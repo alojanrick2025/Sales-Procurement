@@ -651,11 +651,7 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
                                 <i class="ph-bold ph-file-text"></i> Quotations
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link <?php echo in_array(basename($_SERVER['PHP_SELF']), ['customer_po.php', 'add_customer_po.php', 'view_customer_po.php']) ? 'active' : ''; ?>" href="/orders/customer_po.php">
-                                <i class="ph-bold ph-receipt"></i> Customer Purchase Orders
-                            </a>
-                        </li>
+
                         <li class="nav-item">
                             <a class="nav-link <?php echo in_array(basename($_SERVER['PHP_SELF']), ['supplier_po.php', 'add_supplier_po.php', 'view_supplier_po.php']) ? 'active' : ''; ?>" href="/orders/supplier_po.php">
                                 <i class="ph-bold ph-shopping-cart"></i> Supplier Purchase Orders

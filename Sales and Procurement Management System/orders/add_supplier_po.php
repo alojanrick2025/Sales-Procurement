@@ -207,10 +207,10 @@ require_once __DIR__ . '/../includes/header.php';
                                     <?php endforeach; ?>
                                 </select>
                                 <input type="hidden" name="item_id[]" class="item-id-input" value="">
-                                <input type="text" class="form-control form-control-sm mt-1 item-name-input"
-                                    name="item_name[]" placeholder="Item name..." required>
-                                <input type="text" class="form-control form-control-sm mt-1 item-desc-input"
-                                    name="item_desc[]" placeholder="Description (optional)">
+                                <input type="hidden" class="item-name-input"
+                                    name="item_name[]" required>
+                                <input type="hidden" class="item-desc-input"
+                                    name="item_desc[]">
                             </td>
                             <td><input type="text" class="form-control form-control-sm item-unit-input"
                                     name="item_unit[]" placeholder="PCS"></td>
@@ -297,8 +297,8 @@ require_once __DIR__ . '/../includes/header.php';
                 <option value="">-- Choose Item from Dropdown --</option>${options}
             </select>
             <input type="hidden" name="item_id[]" class="item-id-input" value="">
-            <input type="text" class="form-control form-control-sm mt-1 item-name-input" name="item_name[]" placeholder="Item name..." required>
-            <input type="text" class="form-control form-control-sm mt-1 item-desc-input" name="item_desc[]" placeholder="Description (optional)">
+            <input type="hidden" class="item-name-input" name="item_name[]" required>
+            <input type="hidden" class="item-desc-input" name="item_desc[]">
         </td>
         <td><input type="text" class="form-control form-control-sm item-unit-input" name="item_unit[]" placeholder="PCS"></td>
         <td><input type="number" class="form-control form-control-sm item-qty-input" name="item_qty[]" value="1" min="0.01" step="0.01"></td>
