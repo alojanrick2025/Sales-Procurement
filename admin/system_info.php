@@ -374,9 +374,7 @@ $logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo']
                         <h5 class="fw-bold mb-1 d-flex align-items-center gap-2" style="color: #16231D;">
                             <i class="ph-bold ph-lock-key" style="color: #2F6147;"></i> Change Administrator Password
                         </h5>
-                        <p class="text-muted small mb-0">
-                            Update the system administrator password. Changes are encrypted in the <code>users</code> table and tracked in the <code>password_change_logs</code> table.
-                        </p>
+
                     </div>
                     <div class="form-check form-switch mt-2 mt-sm-0">
                         <input class="form-check-input" type="checkbox" role="switch" id="toggle_password_fields" name="change_password" value="1" style="cursor: pointer; width: 2.6rem; height: 1.35rem;">
