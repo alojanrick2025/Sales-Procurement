@@ -421,7 +421,7 @@ $logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo']
                 <div class="mt-4 pt-3 border-top" style="border-color: #E3E8E5 !important;">
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <span class="small fw-semibold text-muted text-uppercase d-flex align-items-center gap-1">
-                            <i class="ph-bold ph-clock-counter-clockwise"></i> Password Change History (Database Table: <code>password_change_logs</code>)
+                            <i class="ph-bold ph-clock-counter-clockwise"></i> Password Change History
                         </span>
                         <?php if (!empty($systemInfo['last_password_change'])): ?>
                             <span class="badge bg-light text-dark border">
@@ -436,8 +436,6 @@ $logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo']
                                     <th class="py-2 px-3">Date &amp; Time</th>
                                     <th class="py-2 px-3">Account</th>
                                     <th class="py-2 px-3">Changed By</th>
-                                    <th class="py-2 px-3">IP Address</th>
-                                    <th class="py-2 px-3">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -446,8 +444,6 @@ $logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo']
                                     <td class="py-2 px-3"><?php echo date('M d, Y h:i A', strtotime($pLog['changed_at'])); ?></td>
                                     <td class="py-2 px-3 fw-medium"><?php echo htmlspecialchars($pLog['account_username'] ?? 'admin'); ?></td>
                                     <td class="py-2 px-3"><?php echo htmlspecialchars($pLog['changed_by_username'] ?? 'System'); ?></td>
-                                    <td class="py-2 px-3"><code><?php echo htmlspecialchars($pLog['ip_address'] ?? '127.0.0.1'); ?></code></td>
-                                    <td class="py-2 px-3"><span class="badge bg-success-subtle text-success border border-success-subtle">Recorded in DB</span></td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
