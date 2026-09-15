@@ -1,0 +1,63 @@
+# .htaccess file for Sales and Procurement Management System
+# This file enables Apache security and routing for the Sales and Procurement Management System
+
+# Disable directory browsing
+Options -Indexes
+
+# Block direct access to sensitive files, scripts, database dumps, and configuration files
+<FilesMatch "\.(?i:sql|bat|cmd|sh|ps1|md|env|ini|config|cfg|yml|yaml|json|lock|log|bak|backup|old|dist|htaccess|htpasswd)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+RewriteEngine On
+RewriteBase /
+
+# Block access to hidden files and directories (like .git, .env, .agents)
+RewriteCond %{SCRIPT_FILENAME} -d [OR]
+RewriteCond %{SCRIPT_FILENAME} -f
+RewriteRule "(^|/)\." - [F]
+
+# Block direct web access to sensitive internal directories
+RewriteRule ^migrations(/.*)?$ - [F,L]
+RewriteRule ^scratch(/.*)?$ - [F,L]
+
+# Serve static files directly (CSS, JS, images, fonts)
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteCond %{REQUEST_URI} \.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ [NC]
+RewriteRule ^ - [L]
+
+# Root access - redirect to login
+RewriteRule ^$ auth/login.php [L]
+RewriteRule ^index\.php$ auth/login.php [L]
+
+# Map old paths to new folder structure (backward compatibility)
+RewriteRule ^login\.php$ auth/login.php [L]
+RewriteRule ^logout\.php$ auth/logout.php [L]
+RewriteRule ^user_list\.php$ admin/user_list.php [L]
+RewriteRule ^system_info\.php$ admin/system_info.php [L]
+RewriteRule ^toggle_user_status\.php$ admin/toggle_user_status.php [L]
+RewriteRule ^clients\.php$ clients/clients.php [L]
+RewriteRule ^add_client\.php$ clients/add_client.php [L]
+RewriteRule ^edit_client\.php$ clients/edit_client.php [L]
+RewriteRule ^delete_client\.php$ clients/delete_client.php [L]
+RewriteRule ^items\.php$ items/items.php [L]
+RewriteRule ^add_item\.php$ items/add_item.php [L]
+RewriteRule ^edit_item\.php$ items/edit_item.php [L]
+RewriteRule ^delete_item\.php$ items/delete_item.php [L]
+RewriteRule ^import_items\.php$ items/import_items.php [L]
+
+# Handle new folder structure paths (auth/, admin/, orders/, quotation/, etc.)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+)/([^/]+\.php)$ $1/$2 [L]
+
+# Default: show login page if file not found
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ auth/login.php [L]
