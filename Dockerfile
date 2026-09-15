@@ -1,16 +1,21 @@
 FROM php:8.2-apache
-
-# Enable Apache mod_rewrite for routing
 RUN a2enmod rewrite
-
-# Install and enable mysqli extension for MySQL database connections
 RUN docker-php-ext-install mysqli && docker-php-ext-enable mysqli
 
-# Copy the application code to Apache's document root
+# Copy everything you uploaded
 COPY . /var/www/html/
 
-# Give proper permissions to Apache
-RUN chown -R www-data:www-data /var/www/html/
+# Automatically fix the folder structure if the main folder was uploaded by accident
+RUN if [ -d "/var/www/html/Sales and Procurement Management System" ]; then \
+        mv "/var/www/html/Sales and Procurement Management System/"* /var/www/html/ && \
+        mv "/var/www/html/Sales and Procurement Management System/".* /var/www/html/ 2>/dev/null || true && \
+        rm -rf "/var/www/html/Sales and Procurement Management System"; \
+    fi
 
-# Render automatically exposes port 80 for Web Services when using Docker
+# Give Apache permission to use the system's .htaccess router
+RUN echo "<Directory /var/www/html>\n\tAllowOverride All\n</Directory>" > /etc/apache2/conf-available/allow-override.conf \
+    && a2enconf allow-override
+
+# Set final permissions
+RUN chown -R www-data:www-data /var/www/html/
 EXPOSE 80
