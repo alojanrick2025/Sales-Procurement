@@ -39,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $itemUnits = $_POST['item_unit'] ?? [];
     $itemQtys = $_POST['item_qty'] ?? [];
     $itemPrices = $_POST['item_price'] ?? [];
+    $itemMarkdowns = $_POST['item_markdown'] ?? [];
 
     $validItems = [];
     $subtotal = 0;
@@ -46,8 +47,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim($name);
         $qty = floatval($itemQtys[$i] ?? 1);
         $price = floatval($itemPrices[$i] ?? 0);
+        $markdown = max(0, floatval($itemMarkdowns[$i] ?? 0));
+        
         if ($name !== '' && $qty > 0) {
-            $lineTotal = $qty * $price;
+            $lineTotal = $qty * $price * (1 - $markdown / 100);
             $subtotal += $lineTotal;
             $validItems[] = [
                 'item_id' => !empty($itemIds[$i]) ? intval($itemIds[$i]) : null,
@@ -56,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'unit' => trim($itemUnits[$i] ?? ''),
                 'quantity' => $qty,
                 'unit_price' => $price,
+                'markdown' => $markdown,
                 'total_price' => $lineTotal,
             ];
         }
@@ -77,9 +81,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newId = $conn->insert_id;
             $stmt->close();
 
-            $iStmt = $conn->prepare("INSERT INTO supplier_order_items (supplier_order_id, item_id, item_name, description, unit, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $iStmt = $conn->prepare("INSERT INTO supplier_order_items (supplier_order_id, item_id, item_name, description, unit, quantity, unit_price, markdown_rate, total_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($validItems as $item) {
-                $iStmt->bind_param("iisssddd", $newId, $item['item_id'], $item['item_name'], $item['description'], $item['unit'], $item['quantity'], $item['unit_price'], $item['total_price']);
+                $iStmt->bind_param("iisssdddd", $newId, $item['item_id'], $item['item_name'], $item['description'], $item['unit'], $item['quantity'], $item['unit_price'], $item['markdown'], $item['total_price']);
                 if (!$iStmt->execute())
                     throw new Exception("Error saving item: " . $iStmt->error);
             }
@@ -182,10 +186,31 @@ require_once __DIR__ . '/../includes/header.php';
                 <table class="table table-bordered align-middle" id="itemsTable">
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 35%;">Item / Description</th>
-                            <th style="width: 12%;">Unit</th>
-                            <th style="width: 13%;">Qty</th>
-                            <th style="width: 17%;">Unit Price (₱)</th>
+                            <th style="width: 30%;">Item / Description</th>
+                            <th style="width: 10%;">Unit</th>
+                            <th style="width: 10%;">Qty</th>
+                            <th style="width: 13%;">Unit Price (₱)</th>
+                            <th style="width: 14%;">
+                                <div class="d-flex flex-column gap-1">
+                                    <div class="d-flex align-items-center gap-1">
+                                        <span class="text-nowrap">Markdown %</span>
+                                        <input type="number" step="5" min="0" max="999" id="globalMarkdownInput"
+                                            class="form-control form-control-sm text-center" style="width:58px;"
+                                            value="0" placeholder="%">
+                                    </div>
+                                    <div class="d-flex gap-1">
+                                        <button type="button"
+                                            class="btn btn-outline-secondary btn-sm py-0 px-1 global-markdown-preset"
+                                            data-val="10">10</button>
+                                        <button type="button"
+                                            class="btn btn-outline-secondary btn-sm py-0 px-1 global-markdown-preset"
+                                            data-val="20">20</button>
+                                        <button type="button"
+                                            class="btn btn-outline-secondary btn-sm py-0 px-1 global-markdown-preset"
+                                            data-val="30">30</button>
+                                    </div>
+                                </div>
+                            </th>
                             <th style="width: 16%;">Line Total (₱)</th>
                             <th style="width: 7%;">Action</th>
                         </tr>
@@ -218,6 +243,8 @@ require_once __DIR__ . '/../includes/header.php';
                                     name="item_qty[]" value="1" min="0.01" step="0.01"></td>
                             <td><input type="number" class="form-control form-control-sm item-price-input"
                                     name="item_price[]" value="0.00" min="0" step="0.01"></td>
+                            <td><input type="number" step="5" min="0" max="999" name="item_markdown[]"
+                                    class="form-control form-control-sm item-markdown-input text-center" value="0" placeholder="%"></td>
                             <td><input type="text" class="form-control form-control-sm item-total-display bg-light"
                                     readonly value="₱0.00"></td>
                             <td class="text-center">
@@ -278,7 +305,8 @@ require_once __DIR__ . '/../includes/header.php';
         document.querySelectorAll('.item-row').forEach(function (row) {
             const qty = parseFloat(row.querySelector('.item-qty-input').value) || 0;
             const price = parseFloat(row.querySelector('.item-price-input').value) || 0;
-            const lineTotal = qty * price;
+            const markdown = parseFloat(row.querySelector('.item-markdown-input').value) || 0;
+            const lineTotal = qty * price * (1 - markdown / 100);
             row.querySelector('.item-total-display').value = '₱' + lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             subtotal += lineTotal;
         });
@@ -303,6 +331,7 @@ require_once __DIR__ . '/../includes/header.php';
         <td><input type="text" class="form-control form-control-sm item-unit-input" name="item_unit[]" placeholder="PCS"></td>
         <td><input type="number" class="form-control form-control-sm item-qty-input" name="item_qty[]" value="1" min="0.01" step="0.01"></td>
         <td><input type="number" class="form-control form-control-sm item-price-input" name="item_price[]" value="0.00" min="0" step="0.01"></td>
+        <td><input type="number" step="5" min="0" max="999" name="item_markdown[]" class="form-control form-control-sm item-markdown-input text-center" value="0" placeholder="%"></td>
         <td><input type="text" class="form-control form-control-sm item-total-display bg-light" readonly value="₱0.00"></td>
         <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger remove-row-btn"><i class="ph-bold ph-trash"></i></button></td>
     </tr>`;
@@ -325,6 +354,7 @@ require_once __DIR__ . '/../includes/header.php';
         });
         row.querySelector('.item-qty-input').addEventListener('input', calculateTotals);
         row.querySelector('.item-price-input').addEventListener('input', calculateTotals);
+        row.querySelector('.item-markdown-input').addEventListener('input', calculateTotals);
         row.querySelector('.remove-row-btn').addEventListener('click', function () {
             if (document.querySelectorAll('.item-row').length > 1) {
                 row.remove();
@@ -335,13 +365,38 @@ require_once __DIR__ . '/../includes/header.php';
 
     document.querySelectorAll('.item-row').forEach(bindRowEvents);
 
+    // Global markdown logic
+    function applyGlobalMarkdown(val) {
+        document.querySelectorAll('.item-markdown-input').forEach(function (input) {
+            input.value = val;
+        });
+        calculateTotals();
+    }
+
+    document.getElementById('globalMarkdownInput').addEventListener('input', function () {
+        applyGlobalMarkdown(this.value);
+    });
+
+    document.querySelectorAll('.global-markdown-preset').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById('globalMarkdownInput').value = this.dataset.val;
+            applyGlobalMarkdown(this.dataset.val);
+        });
+    });
+
     document.getElementById('addRowBtn').addEventListener('click', function () {
         const tbody = document.getElementById('itemsBody');
         const temp = document.createElement('tbody');
         temp.innerHTML = getRowTemplate();
         const newRow = temp.querySelector('tr');
+        
+        // Inherit current global markdown
+        const globalVal = document.getElementById('globalMarkdownInput').value || '0';
+        newRow.querySelector('.item-markdown-input').value = globalVal;
+        
         tbody.appendChild(newRow);
         bindRowEvents(newRow);
+        calculateTotals();
     });
 </script>
 

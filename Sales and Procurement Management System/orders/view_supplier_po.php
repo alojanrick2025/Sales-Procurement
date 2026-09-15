@@ -187,17 +187,18 @@ require_once __DIR__ . '/../includes/header.php';
                 <thead class="table-light">
                     <tr>
                         <th style="width: 5%;" class="text-center">#</th>
-                        <th style="width: 40%;">Item Name & Description</th>
-                        <th style="width: 12%;" class="text-center">Unit</th>
-                        <th style="width: 13%;" class="text-center">Quantity</th>
+                        <th style="width: 30%;">Item Name & Description</th>
+                        <th style="width: 10%;" class="text-center">Unit</th>
+                        <th style="width: 10%;" class="text-center">Quantity</th>
                         <th style="width: 15%;" class="text-end">Unit Cost / Price</th>
+                        <th style="width: 15%;" class="text-end">Markdown %</th>
                         <th style="width: 15%;" class="text-end">Total Amount</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($items)): ?>
                         <tr>
-                            <td colspan="6" class="text-center text-muted py-5">
+                            <td colspan="7" class="text-center text-muted py-5">
                                 <i class="ph-bold ph-package fs-1 d-block mb-2 text-secondary"></i>
                                 No line items recorded for this purchase order.
                             </td>
@@ -222,6 +223,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 </td>
                                 <td class="text-center fw-semibold"><?php echo number_format($it['quantity'], 2); ?></td>
                                 <td class="text-end">₱<?php echo number_format($it['unit_price'], 2); ?></td>
+                                <td class="text-end text-danger"><?php echo !empty($it['markdown_rate']) ? number_format($it['markdown_rate'], 2) . '%' : '-'; ?></td>
                                 <td class="text-end fw-bold text-dark">₱<?php echo number_format($lineTotal, 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
@@ -229,7 +231,7 @@ require_once __DIR__ . '/../includes/header.php';
                 </tbody>
                 <tfoot class="table-light">
                     <tr>
-                        <td colspan="5" class="text-end fw-bold fs-6">Grand Total:</td>
+                        <td colspan="6" class="text-end fw-bold fs-6">Grand Total:</td>
                         <td class="text-end fw-bold fs-5 text-primary">
                             ₱<?php echo number_format(!empty($po['total_amount']) ? $po['total_amount'] : ($computedSubtotal ?? 0), 2); ?>
                         </td>
