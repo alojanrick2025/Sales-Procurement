@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/two_factor.php';
 
 $error = '';
 
@@ -29,17 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($user['status'] === 'inactive') {
                 $error = 'Your account is inactive. Please contact administrator.';
             } elseif (password_verify($password, $user['password'])) {
-                // Set unified session variables
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['user_username'] = $user['username'];
-                $_SESSION['user_name'] = $user['full_name'];
-                $_SESSION['user_type'] = $user['user_type'];
-                
-                // Redirect to dashboard
-                header('Location: /admin/index.php');
                 $stmt->close();
                 $conn->close();
-                exit();
+                // Logs in, or redirects to the 2FA code prompt when enabled
+                beginLogin($user);
             } else {
                 $error = 'Invalid username or password';
             }

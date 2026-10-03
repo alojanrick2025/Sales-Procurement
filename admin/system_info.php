@@ -234,8 +234,23 @@ if ($logRes) {
     }
 }
 
+// Two-Factor Authentication status for the toggle section
+require_once __DIR__ . '/../includes/two_factor.php';
+tfaEnsureSchema($conn);
+$tfaEnabled = tfaIsEnabled($conn);
+$tfaStored = tfaGetUserSecret($conn, (int) $_SESSION['user_id']);
+$tfaHasSecret = !empty($tfaStored['totp_secret']);
+$tfaFlash = $_SESSION['tfa_flash'] ?? null;
+unset($_SESSION['tfa_flash']);
+// Admin has no authenticator yet: prepare one to scan before turning 2FA on
+if (!$tfaHasSecret && empty($_SESSION['tfa_setup_secret'])) {
+    $_SESSION['tfa_setup_secret'] = tfaGenerateSecret();
+}
+$tfaSetupSecret = $tfaHasSecret ? '' : $_SESSION['tfa_setup_secret'];
+$tfaOtpUri = $tfaHasSecret ? '' : tfaProvisioningUri($tfaSetupSecret, $_SESSION['user_username'], tfaIssuerName());
+
 $conn->close();
-$logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'], '/') : '';
+$logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'], '/') : '';
 ?>
 
 <style>
@@ -462,6 +477,84 @@ $logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo']
     </div>
 </div>
 
+<!-- Two-Factor Authentication Section (separate form: forms cannot be nested) -->
+<div class="card shadow-sm border-0 mt-4" id="two-factor">
+    <div class="card-body p-4">
+        <?php if ($tfaFlash): ?>
+            <div class="alert alert-<?php echo $tfaFlash['type'] === 'success' ? 'success' : 'danger'; ?> alert-dismissible fade show" role="alert">
+                <i class="ph-bold <?php echo $tfaFlash['type'] === 'success' ? 'ph-check-circle' : 'ph-warning-circle'; ?>"></i> <?php echo htmlspecialchars($tfaFlash['message']); ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+
+        <div class="d-flex flex-wrap align-items-center justify-content-between">
+            <div>
+                <h5 class="fw-bold mb-1 d-flex align-items-center gap-2" style="color: #16231D;">
+                    <i class="ph-bold ph-shield-check" style="color: #2F6147;"></i> Two-Factor Authentication (2FA)
+                    <?php if ($tfaEnabled): ?>
+                        <span class="badge bg-success">ON</span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary">OFF</span>
+                    <?php endif; ?>
+                </h5>
+                <p class="text-muted small mb-0">When on, every user must enter a 6-digit code from an authenticator app after their password or Google sign-in.</p>
+            </div>
+            <div class="form-check form-switch mt-2 mt-sm-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="toggle_two_factor" <?php echo $tfaEnabled ? 'checked' : ''; ?> style="cursor: pointer; width: 2.6rem; height: 1.35rem;">
+                <label class="form-check-label fw-semibold small ms-2" for="toggle_two_factor" style="cursor: pointer; color: #16231D;">
+                    <?php echo $tfaEnabled ? 'Turn Off 2FA' : 'Turn On 2FA'; ?>
+                </label>
+            </div>
+        </div>
+
+        <div id="two_factor_panel" class="mt-3" style="display: none;">
+            <div class="p-3 p-md-4 rounded-3 border" style="background-color: #F8FAF9; border-color: #E3E8E5 !important;">
+                <form method="POST" action="/admin/two_factor_settings.php" autocomplete="off">
+                    <?php echo csrfField(); ?>
+                    <input type="hidden" name="action" value="<?php echo $tfaEnabled ? 'disable' : 'enable'; ?>">
+
+                    <?php if (!$tfaEnabled && !$tfaHasSecret): ?>
+                        <div class="row g-4 align-items-center mb-3">
+                            <div class="col-md-auto text-center">
+                                <div class="d-inline-block p-2 bg-white border rounded-3"><div id="tfa_setup_qr"></div></div>
+                            </div>
+                            <div class="col-md">
+                                <ol class="small mb-2 ps-3">
+                                    <li>Install <strong>Google Authenticator</strong> or <strong>Microsoft Authenticator</strong> on your phone.</li>
+                                    <li>Scan this QR code with the app.</li>
+                                    <li>Enter the 6-digit code it shows below and click <strong>Turn On</strong>.</li>
+                                </ol>
+                                <div class="small text-muted">Can't scan? Enter this key manually:</div>
+                                <code class="d-inline-block mt-1 p-2 bg-white border rounded-2" style="letter-spacing: 1px;"><?php echo htmlspecialchars(trim(chunk_split($tfaSetupSecret, 4, ' '))); ?></code>
+                            </div>
+                        </div>
+                    <?php elseif (!$tfaEnabled): ?>
+                        <p class="small mb-3">Enter the 6-digit code from your authenticator app to turn on two-factor authentication.</p>
+                    <?php else: ?>
+                        <p class="small mb-3">Enter the 6-digit code from your authenticator app to turn off two-factor authentication.</p>
+                    <?php endif; ?>
+
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <input type="text" class="form-control" name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" required placeholder="6-digit code" autocomplete="one-time-code" style="max-width: 180px; letter-spacing: 3px;">
+                        <?php if ($tfaEnabled): ?>
+                            <button type="submit" class="btn btn-danger px-4"><i class="ph-bold ph-shield-slash"></i> Turn Off</button>
+                        <?php else: ?>
+                            <button type="submit" class="btn btn-primary px-4"><i class="ph-bold ph-shield-check"></i> Turn On</button>
+                        <?php endif; ?>
+                        <button type="button" class="btn btn-outline-secondary" id="two_factor_cancel">Cancel</button>
+                    </div>
+
+                    <?php if (!$tfaEnabled): ?>
+                        <div class="form-text small text-muted mt-2">
+                            <i class="ph-bold ph-info me-1"></i>Other users will be asked to scan their own QR code the next time they log in.
+                        </div>
+                    <?php endif; ?>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal for Bigger Logo Preview -->
 <?php if (!empty($logoDisplayPath)): ?>
 <div class="modal fade" id="logoPreviewModal" tabindex="-1" aria-labelledby="logoPreviewModalLabel" aria-hidden="true">
@@ -493,6 +586,10 @@ $logoDisplayPath = !empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo']
 </div>
 <?php endif; ?>
 
+<?php if (!$tfaHasSecret): ?>
+<!-- Draws the 2FA QR code in the browser so the secret never leaves the page -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<?php endif; ?>
 <script>
 function handleLogoFileSelect(input) {
     if (input.files && input.files[0]) {
@@ -530,6 +627,36 @@ function togglePasswordVisibility(fieldId, btn) {
         }
     }
 }
+
+// 2FA switch: opens the confirm panel; the setting only changes after a valid code
+document.addEventListener('DOMContentLoaded', function() {
+    const tfaSwitch = document.getElementById('toggle_two_factor');
+    const tfaPanel = document.getElementById('two_factor_panel');
+    const tfaCancel = document.getElementById('two_factor_cancel');
+    let qrDrawn = false;
+    function showTfaPanel(show) {
+        tfaPanel.style.display = show ? 'block' : 'none';
+        if (show) {
+            const qrEl = document.getElementById('tfa_setup_qr');
+            if (qrEl && !qrDrawn && window.QRCode) {
+                new QRCode(qrEl, { text: <?php echo json_encode($tfaOtpUri, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES); ?>, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
+                qrDrawn = true;
+            }
+            const codeInput = tfaPanel.querySelector('input[name="code"]');
+            if (codeInput) codeInput.focus();
+        }
+    }
+    if (tfaSwitch && tfaPanel) {
+        tfaSwitch.addEventListener('click', function(e) {
+            e.preventDefault(); // keep showing the real state until confirmed
+            showTfaPanel(tfaPanel.style.display === 'none');
+        });
+        if (tfaCancel) tfaCancel.addEventListener('click', function() { showTfaPanel(false); });
+        <?php if ($tfaFlash && $tfaFlash['type'] !== 'success'): ?>
+        showTfaPanel(true); // wrong code: reopen so the admin can retry
+        <?php endif; ?>
+    }
+});
 
 document.addEventListener('DOMContentLoaded', function() {
     const toggleSwitch = document.getElementById('toggle_password_fields');

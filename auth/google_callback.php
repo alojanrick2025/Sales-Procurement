@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/two_factor.php';
 
 // Send the user back to the login page with a message
 function googleLoginFail($message) {
@@ -101,12 +102,5 @@ if ($user['status'] === 'inactive') {
     googleLoginFail('Your account is inactive. Please contact administrator.');
 }
 
-// Same session variables as the username/password login
-session_regenerate_id(true);
-$_SESSION['user_id'] = $user['id'];
-$_SESSION['user_username'] = $user['username'];
-$_SESSION['user_name'] = $user['full_name'];
-$_SESSION['user_type'] = $user['user_type'];
-
-header('Location: /admin/index.php');
-exit();
+// Same as the username/password login: logs in, or asks for the 2FA code
+beginLogin($user);
