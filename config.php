@@ -70,18 +70,11 @@ function requireAdminLogin() {
     }
 }
 
-// Browser tab icon: the company logo from System Information, or the bundled JESS logo
+// Browser tab icon: the round JESS logo with a transparent background
+// (favicon-32.png / apple-touch-icon.png in the project root)
 function faviconTag() {
-    $info = getSystemInfo();
-    $logo = !empty($info['logo']) ? ltrim($info['logo'], '/') : '';
-    if ($logo === '' || !is_file(__DIR__ . '/' . $logo)) {
-        $logo = 'uploads/logo_jess.png';
-    }
-    $types = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp'];
-    $type = $types[strtolower(pathinfo($logo, PATHINFO_EXTENSION))] ?? 'image/png';
-    $href = htmlspecialchars('/' . $logo, ENT_QUOTES);
-    return '<link rel="icon" type="' . $type . '" href="' . $href . '">' . "\n"
-        . '    <link rel="apple-touch-icon" href="' . $href . '">';
+    return '<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">' . "\n"
+        . '    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' . "\n";
 }
 
 // Google Sign-In is shown only when credentials are configured
