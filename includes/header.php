@@ -613,6 +613,68 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
                 gap: 0.75rem;
             }
         }
+        /* Data tables become one card per row on phones (labels added by footer.php),
+           so every column is visible without scrolling sideways (screen only: printouts keep the table) */
+        @media screen and (max-width: 768px) {
+            table.mobile-cards thead {
+                display: none;
+            }
+            table.mobile-cards,
+            table.mobile-cards tbody {
+                display: block;
+                width: 100%;
+            }
+            table.mobile-cards tbody tr {
+                display: block;
+                background: #FFFFFF;
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                padding: 4px 12px;
+                margin: 0 0 12px;
+            }
+            table.mobile-cards tbody tr:hover {
+                background: #FFFFFF;
+            }
+            /* Label on the left (::before), the cell's own content stacked on the right */
+            table.mobile-cards > tbody > tr > td {
+                display: block;
+                position: relative;
+                min-height: 2.4rem;
+                padding: 8px 0 8px 40% !important;
+                border: 0;
+                border-bottom: 1px solid #EEF2F0;
+                text-align: right;
+                overflow-wrap: anywhere;
+            }
+            table.mobile-cards > tbody > tr > td:last-child {
+                border-bottom: 0;
+            }
+            table.mobile-cards > tbody > tr > td::before {
+                content: attr(data-label);
+                position: absolute;
+                left: 0;
+                top: 10px;
+                width: 38%;
+                text-align: left;
+                font-size: 0.72rem;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                color: var(--text-secondary);
+            }
+            /* Cells without a heading (e.g. action buttons) and "no results" rows use the full width */
+            table.mobile-cards > tbody > tr > td[data-label=""],
+            table.mobile-cards > tbody > tr > td[colspan] {
+                padding-left: 0 !important;
+            }
+            table.mobile-cards > tbody > tr > td[colspan] {
+                text-align: center;
+            }
+            table.mobile-cards > tbody > tr > td[data-label=""]::before,
+            table.mobile-cards > tbody > tr > td[colspan]::before {
+                display: none;
+            }
+        }
         @media (max-width: 576px) {
             .user-info,
             .user-profile-dropdown > .ph-caret-down {

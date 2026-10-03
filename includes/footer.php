@@ -88,6 +88,34 @@
             html.classList.add('sidebar-collapsed');
         }
     })();
+
+    // Phones: show data tables as cards. Each cell gets its column heading as a label
+    // (see table.mobile-cards in header.php). Entry forms and the printable sheet keep their layout.
+    (function() {
+        document.querySelectorAll('.main-content table').forEach(function(table) {
+            if (table.id === 'itemsTable' || table.closest('.printable-order-sheet') || !table.tHead) {
+                return;
+            }
+            const headings = Array.from(table.tHead.querySelectorAll('th')).map(function(th) {
+                return th.textContent.replace(/\s+/g, ' ').trim();
+            });
+            const label = function() {
+                table.querySelectorAll('tbody tr').forEach(function(tr) {
+                    Array.from(tr.children).forEach(function(td, i) {
+                        if (!td.hasAttribute('data-label')) {
+                            td.setAttribute('data-label', headings[i] || '');
+                        }
+                    });
+                });
+            };
+            label();
+            table.classList.add('mobile-cards');
+            // Rows added later (e.g. "No results found") get labels too
+            Array.from(table.tBodies).forEach(function(tbody) {
+                new MutationObserver(label).observe(tbody, { childList: true });
+            });
+        });
+    })();
     </script>
 </body>
 </html>
