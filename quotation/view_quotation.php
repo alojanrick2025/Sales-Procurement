@@ -227,15 +227,30 @@ require_once __DIR__ . '/../includes/header.php';
     }
 
     /* Print specifications */
-    /* Phones: tighter sheet, and let the items table scroll sideways instead of being cut off */
+    /* Phones: show the whole sheet at its normal (paper) layout, scaled down to fit the
+       screen like a PDF preview - see fitSheetToScreen() below. Pinch to zoom in. */
     @media screen and (max-width: 768px) {
-        .printable-order-sheet {
-            padding: 16px;
-            overflow-x: auto;
+        .sheet-fit {
+            overflow: hidden;
+        }
+        .sheet-fit .printable-order-sheet {
+            width: 800px;
+            max-width: none;
+            transform-origin: top left;
         }
     }
 
     @media print {
+        /* Undo the phone preview scaling when printing */
+        .sheet-fit {
+            height: auto !important;
+            overflow: visible !important;
+        }
+        .sheet-fit .printable-order-sheet {
+            transform: none !important;
+            width: auto !important;
+        }
+
         @page {
             size: portrait;
             margin: 10mm 12mm;
@@ -440,6 +455,38 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+// Phones: scale the quotation sheet down so the whole page is visible, like a PDF preview
+(function fitSheetToScreen() {
+    const sheet = document.querySelector('.printable-order-sheet');
+    if (!sheet) {
+        return;
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet-fit';
+    sheet.parentNode.insertBefore(wrap, sheet);
+    wrap.appendChild(sheet);
+
+    const phone = window.matchMedia('screen and (max-width: 768px)');
+    const fit = function() {
+        if (phone.matches) {
+            const scale = Math.min(1, wrap.clientWidth / sheet.offsetWidth);
+            sheet.style.transform = 'scale(' + scale + ')';
+            wrap.style.height = Math.ceil(sheet.offsetHeight * scale) + 'px';
+        } else {
+            sheet.style.transform = '';
+            wrap.style.height = '';
+        }
+    };
+    fit();
+    window.addEventListener('load', fit);      // after the logo has loaded
+    window.addEventListener('resize', fit);    // rotation
+    if (phone.addEventListener) {
+        phone.addEventListener('change', fit);
+    }
+})();
+</script>
 
 <?php
 $conn->close();

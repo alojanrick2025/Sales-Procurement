@@ -164,6 +164,7 @@ function requireLogin() {
         header('Location: /auth/login.php');
         exit();
     }
+    getSystemInfo(); // also upgrades the database schema if needed, before the page queries it
 }
 
 // Redirect admin to login if not authenticated
@@ -172,6 +173,7 @@ function requireAdminLogin() {
         header('Location: /auth/login.php');
         exit();
     }
+    getSystemInfo(); // also upgrades the database schema if needed, before the page queries it
 }
 
 // Browser tab icon: the round JESS logo with a transparent background
@@ -271,8 +273,78 @@ function getSystemInfo() {
                 $sysInfo[$row['meta_field']] = $row['meta_value'];
             }
         }
+        // Bring an older database up to date (runs once, then the stored version matches)
+        if ((int) ($sysInfo['schema_version'] ?? 0) < SCHEMA_VERSION) {
+            migrateSchema($conn);
+            $sysInfo['schema_version'] = (string) SCHEMA_VERSION;
+        }
         $conn->close();
     }
     return $sysInfo;
+}
+
+/*
+ * Database schema upgrades. database.sql lacks tables/columns the app needs, so an
+ * existing database (e.g. the live one) is upgraded automatically on first page load.
+ * Every step is safe to run again.
+ */
+define('SCHEMA_VERSION', 1);
+
+function migrateSchema($conn) {
+    // Line items of customer and supplier purchase orders
+    $conn->query("CREATE TABLE IF NOT EXISTS customer_order_items (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        customer_order_id INT NOT NULL,
+        item_id INT DEFAULT NULL,
+        item_name VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT NULL,
+        unit VARCHAR(50) DEFAULT NULL,
+        quantity DECIMAL(10,2) NOT NULL DEFAULT 1.00,
+        unit_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        total_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        KEY customer_order_id (customer_order_id)
+    )");
+    $conn->query("CREATE TABLE IF NOT EXISTS supplier_order_items (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        supplier_order_id INT NOT NULL,
+        item_id INT DEFAULT NULL,
+        item_name VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT NULL,
+        unit VARCHAR(50) DEFAULT NULL,
+        quantity DECIMAL(10,2) NOT NULL DEFAULT 1.00,
+        unit_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        markdown_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+        total_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        KEY supplier_order_id (supplier_order_id)
+    )");
+
+    // Mark-up and S.O.P. amounts used by quotations
+    $columns = [
+        ['quotations', 'markup_rate', 'DECIMAL(5,2) DEFAULT 0.00'],
+        ['quotations', 'markup_amount', 'DECIMAL(12,2) DEFAULT 0.00'],
+        ['quotations', 'sop_amount', 'DECIMAL(12,2) DEFAULT 0.00'],
+        ['quotation_items', 'markup_rate', 'DECIMAL(5,2) DEFAULT 0.00'],
+    ];
+    $check = $conn->prepare("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+    foreach ($columns as [$table, $column, $definition]) {
+        $check->bind_param("ss", $table, $column);
+        $check->execute();
+        if ((int) $check->get_result()->fetch_assoc()['n'] === 0) {
+            try {
+                $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            } catch (mysqli_sql_exception $e) {
+                if ($e->getCode() !== 1060) { // 1060 = another request already added it
+                    throw $e;
+                }
+            }
+        }
+    }
+    $check->close();
+
+    $version = (string) SCHEMA_VERSION;
+    $stmt = $conn->prepare("INSERT INTO system_info (meta_field, meta_value) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");
+    $stmt->bind_param("s", $version);
+    $stmt->execute();
+    $stmt->close();
 }
 

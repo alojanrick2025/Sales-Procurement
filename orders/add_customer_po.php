@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn->begin_transaction();
         try {
             $stmt = $conn->prepare("INSERT INTO customer_orders (po_number, quotation_id, customer_id, customer_name, order_date, total_amount, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("siisdsss", $po_number, $quotation_id, $customer_id, $customer_name, $order_date, $grand_total, $status, $notes);
+            $stmt->bind_param("siissdss", $po_number, $quotation_id, $customer_id, $customer_name, $order_date, $grand_total, $status, $notes);
             if (!$stmt->execute())
                 throw new Exception("Error saving PO: " . $stmt->error);
             $newId = $conn->insert_id;
