@@ -667,9 +667,13 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
                     </a>
                 </li>
                 <li>
-                    <a class="dropdown-item text-danger" href="/auth/logout.php">
-                        <i class="ph-bold ph-sign-out"></i> Logout
-                    </a>
+                    <!-- POST with a token, so a browser preloading links can't log the user out -->
+                    <form method="POST" action="/auth/logout.php" class="m-0">
+                        <?php echo csrfField(); ?>
+                        <button type="submit" class="dropdown-item text-danger">
+                            <i class="ph-bold ph-sign-out"></i> Logout
+                        </button>
+                    </form>
                 </li>
             </ul>
         </div>

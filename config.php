@@ -38,8 +38,112 @@ function getDBConnection() {
     }
 }
 
+// Render terminates HTTPS at its proxy and forwards plain HTTP
+function isHttpsRequest() {
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+}
+
+// Logged-in users are signed out after this many seconds without activity
+define('SESSION_IDLE_TIMEOUT', 8 * 60 * 60);
+
+/**
+ * Sessions are stored in the database instead of files: Render wipes the
+ * container's files on every deploy and when the free instance sleeps,
+ * which logged everyone out.
+ */
+class DbSessionHandler implements SessionHandlerInterface, SessionUpdateTimestampHandlerInterface {
+    private $conn;
+
+    public function open($path, $name): bool {
+        $this->conn = getDBConnection();
+        return true;
+    }
+
+    // Run a query; on first use create the sessions table (MySQL error 1146 = table missing)
+    private function query($sql, $types, ...$params) {
+        try {
+            $stmt = $this->conn->prepare($sql);
+        } catch (mysqli_sql_exception $e) {
+            if ($e->getCode() !== 1146) {
+                throw $e;
+            }
+            $this->conn->query("CREATE TABLE IF NOT EXISTS app_sessions (
+                id VARCHAR(128) NOT NULL PRIMARY KEY,
+                data MEDIUMBLOB NOT NULL,
+                last_activity INT NOT NULL,
+                KEY last_activity (last_activity)
+            )");
+            $stmt = $this->conn->prepare($sql);
+        }
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        return $stmt;
+    }
+
+    public function close(): bool {
+        if ($this->conn) {
+            $this->conn->close();
+            $this->conn = null;
+        }
+        return true;
+    }
+
+    public function read($id): string|false {
+        $stmt = $this->query("SELECT data FROM app_sessions WHERE id = ? AND last_activity >= ?", "si", $id, time() - SESSION_IDLE_TIMEOUT);
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ? $row['data'] : '';
+    }
+
+    public function write($id, $data): bool {
+        // Don't store empty sessions (visitors who never logged in, bots)
+        if ($data === '') {
+            return $this->destroy($id);
+        }
+        $this->query("REPLACE INTO app_sessions (id, data, last_activity) VALUES (?, ?, ?)", "ssi", $id, $data, time())->close();
+        return true;
+    }
+
+    public function destroy($id): bool {
+        $this->query("DELETE FROM app_sessions WHERE id = ?", "s", $id)->close();
+        return true;
+    }
+
+    public function gc($maxLifetime): int|false {
+        $stmt = $this->query("DELETE FROM app_sessions WHERE last_activity < ?", "i", time() - $maxLifetime);
+        $deleted = $stmt->affected_rows;
+        $stmt->close();
+        return $deleted;
+    }
+
+    // Used with strict mode: only accept session IDs this server issued (and not expired)
+    public function validateId($id): bool {
+        $stmt = $this->query("SELECT 1 FROM app_sessions WHERE id = ? AND last_activity >= ?", "si", $id, time() - SESSION_IDLE_TIMEOUT);
+        $exists = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+        return $exists;
+    }
+
+    // Data unchanged: just keep the session alive
+    public function updateTimestamp($id, $data): bool {
+        $this->query("UPDATE app_sessions SET last_activity = ? WHERE id = ?", "is", time(), $id)->close();
+        return true;
+    }
+}
+
 // Start session if not already started
 if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.gc_maxlifetime', (string) SESSION_IDLE_TIMEOUT);
+    session_set_cookie_params([
+        'lifetime' => 0,               // until the browser is closed
+        'path'     => '/',
+        'secure'   => isHttpsRequest(),
+        'httponly' => true,            // not readable by JavaScript
+        'samesite' => 'Lax',           // not sent on form posts from other websites
+    ]);
+    session_set_save_handler(new DbSessionHandler(), true);
     session_start();
 }
 
@@ -87,10 +191,7 @@ function getGoogleRedirectUri() {
     if (GOOGLE_REDIRECT_URI !== '') {
         return GOOGLE_REDIRECT_URI;
     }
-    // Render terminates HTTPS at its proxy and forwards plain HTTP
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-    $scheme = $https ? 'https' : 'http';
+    $scheme = isHttpsRequest() ? 'https' : 'http';
     return $scheme . '://' . $_SERVER['HTTP_HOST'] . '/auth/google_callback.php';
 }
 
