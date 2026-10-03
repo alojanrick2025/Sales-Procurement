@@ -237,12 +237,8 @@ if ($logRes) {
 // Two-Factor Authentication status for the toggle section
 require_once __DIR__ . '/../includes/two_factor.php';
 $tfaEnabled = tfaIsEnabled($conn);
-$tfaEmail = tfaGetUserEmail($conn, (int) $_SESSION['user_id']);
-$tfaMailReady = isMailConfigured();
 $tfaFlash = $_SESSION['tfa_flash'] ?? null;
 unset($_SESSION['tfa_flash']);
-$tfaCode = tfaCodeInfo('settings', (int) $_SESSION['user_id']);
-$tfaSecondsLeft = $tfaCode ? $tfaCode['seconds_left'] : 0;
 
 $conn->close();
 $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'], '/') : '';
@@ -495,63 +491,15 @@ $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'],
                 </h5>
                 <p class="text-muted small mb-0">When on, every user must enter a 6-digit code sent to their email (valid for 2 minutes) after their password or Google sign-in.</p>
             </div>
-            <div class="form-check form-switch mt-2 mt-sm-0">
-                <input class="form-check-input" type="checkbox" role="switch" id="toggle_two_factor" <?php echo $tfaEnabled ? 'checked' : ''; ?> style="cursor: pointer; width: 2.6rem; height: 1.35rem;">
+            <!-- Flipping the switch saves the setting immediately -->
+            <form method="POST" action="/admin/two_factor_settings.php" class="form-check form-switch mt-2 mt-sm-0 mb-0">
+                <?php echo csrfField(); ?>
+                <input type="hidden" name="two_factor_enabled" value="0">
+                <input class="form-check-input" type="checkbox" role="switch" id="toggle_two_factor" name="two_factor_enabled" value="1" <?php echo $tfaEnabled ? 'checked' : ''; ?> onchange="this.form.submit()" style="cursor: pointer; width: 2.6rem; height: 1.35rem;">
                 <label class="form-check-label fw-semibold small ms-2" for="toggle_two_factor" style="cursor: pointer; color: #16231D;">
                     <?php echo $tfaEnabled ? 'Turn Off 2FA' : 'Turn On 2FA'; ?>
                 </label>
-            </div>
-        </div>
-
-        <div id="two_factor_panel" class="mt-3" style="display: none;">
-            <div class="p-3 p-md-4 rounded-3 border" style="background-color: #F8FAF9; border-color: #E3E8E5 !important;">
-                <?php if (!$tfaMailReady): ?>
-                    <div class="alert alert-warning small mb-0">
-                        <i class="ph-bold ph-warning me-1"></i>Email sending is not set up yet, so codes cannot be delivered. Add the Gmail settings to the server's environment variables first (see <strong>GMAIL-OTP-SETUP.md</strong>).
-                    </div>
-                <?php elseif (empty($tfaEmail)): ?>
-                    <div class="alert alert-warning small mb-0">
-                        <i class="ph-bold ph-warning me-1"></i>Your account has no email address. Add one in <strong>My Profile</strong> first.
-                    </div>
-                <?php else: ?>
-                    <p class="small mb-3">
-                        <strong>Step 1:</strong> Send a verification code to <strong><?php echo htmlspecialchars(tfaMaskEmail($tfaEmail)); ?></strong>.
-                        <strong>Step 2:</strong> Enter it below to turn two-factor authentication <?php echo $tfaEnabled ? 'off' : 'on'; ?>.
-                    </p>
-
-                    <form method="POST" action="/admin/two_factor_settings.php" class="mb-3">
-                        <?php echo csrfField(); ?>
-                        <input type="hidden" name="action" value="send">
-                        <!-- Disabled while a code is still valid; re-enabled by the countdown when it expires -->
-                        <button type="submit" class="btn btn-outline-primary" id="tfa_send_btn" <?php echo $tfaCode ? 'disabled' : ''; ?>>
-                            <i class="ph-bold ph-paper-plane-tilt"></i> <?php echo $tfaCode ? 'Code Sent' : 'Send Code'; ?>
-                        </button>
-                        <?php if ($tfaCode): ?>
-                            <span class="small ms-2" id="tfa_settings_timer" data-seconds="<?php echo (int) $tfaSecondsLeft; ?>"></span>
-                        <?php endif; ?>
-                    </form>
-
-                    <form method="POST" action="/admin/two_factor_settings.php" autocomplete="off">
-                        <?php echo csrfField(); ?>
-                        <input type="hidden" name="action" value="<?php echo $tfaEnabled ? 'disable' : 'enable'; ?>">
-                        <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <input type="text" class="form-control" name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" required placeholder="6-digit code" autocomplete="one-time-code" style="max-width: 180px; letter-spacing: 3px;">
-                            <?php if ($tfaEnabled): ?>
-                                <button type="submit" class="btn btn-danger px-4"><i class="ph-bold ph-shield-slash"></i> Turn Off</button>
-                            <?php else: ?>
-                                <button type="submit" class="btn btn-primary px-4"><i class="ph-bold ph-shield-check"></i> Turn On</button>
-                            <?php endif; ?>
-                            <button type="button" class="btn btn-outline-secondary" id="two_factor_cancel">Cancel</button>
-                        </div>
-                    </form>
-
-                    <?php if (!$tfaEnabled): ?>
-                        <div class="form-text small text-muted mt-2">
-                            <i class="ph-bold ph-info me-1"></i>Make sure every user has a correct email address in User Management - codes are sent there.
-                        </div>
-                    <?php endif; ?>
-                <?php endif; ?>
-            </div>
+            </form>
         </div>
     </div>
 </div>
@@ -624,52 +572,6 @@ function togglePasswordVisibility(fieldId, btn) {
         }
     }
 }
-
-// 2FA switch: opens the confirm panel; the setting only changes after a valid code
-document.addEventListener('DOMContentLoaded', function() {
-    const tfaSwitch = document.getElementById('toggle_two_factor');
-    const tfaPanel = document.getElementById('two_factor_panel');
-    const tfaCancel = document.getElementById('two_factor_cancel');
-    function showTfaPanel(show) {
-        tfaPanel.style.display = show ? 'block' : 'none';
-        if (show) {
-            const codeInput = tfaPanel.querySelector('input[name="code"]');
-            if (codeInput) codeInput.focus();
-        }
-    }
-    // Countdown for the emailed code
-    const tfaTimer = document.getElementById('tfa_settings_timer');
-    if (tfaTimer) {
-        let left = parseInt(tfaTimer.dataset.seconds, 10);
-        const sendBtn = document.getElementById('tfa_send_btn');
-        const tick = function() {
-            if (left > 0) {
-                tfaTimer.textContent = 'Code already sent - expires in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + '. You can send a new one after that.';
-                tfaTimer.className = 'small ms-2 text-success';
-            } else {
-                tfaTimer.textContent = 'Code expired - send a new one.';
-                tfaTimer.className = 'small ms-2 text-danger';
-                if (sendBtn && sendBtn.disabled) {
-                    sendBtn.disabled = false;
-                    sendBtn.innerHTML = '<i class="ph-bold ph-paper-plane-tilt"></i> Send New Code';
-                }
-            }
-            left--;
-        };
-        tick();
-        setInterval(tick, 1000);
-    }
-    if (tfaSwitch && tfaPanel) {
-        tfaSwitch.addEventListener('click', function(e) {
-            e.preventDefault(); // keep showing the real state until confirmed
-            showTfaPanel(tfaPanel.style.display === 'none');
-        });
-        if (tfaCancel) tfaCancel.addEventListener('click', function() { showTfaPanel(false); });
-        <?php if ($tfaFlash && !empty($tfaFlash['open'])): ?>
-        showTfaPanel(true); // code sent or wrong code: keep the panel open
-        <?php endif; ?>
-    }
-});
 
 document.addEventListener('DOMContentLoaded', function() {
     const toggleSwitch = document.getElementById('toggle_password_fields');
