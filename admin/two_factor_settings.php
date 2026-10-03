@@ -7,12 +7,17 @@
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/two_factor.php';
 requireAdminLogin();
-requirePostWithCsrf();
 
 function tfaSettingsDone($type, $message, $openPanel = false) {
     $_SESSION['tfa_flash'] = ['type' => $type, 'message' => $message, 'open' => $openPanel];
     header('Location: /admin/system_info.php#two-factor');
     exit();
+}
+
+// A stale page (e.g. opened before a redeploy reset sessions) has an old token:
+// send the admin back to a fresh page instead of a bare error
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !validateCsrfToken()) {
+    tfaSettingsDone('danger', 'Your session was refreshed. Please try again.', true);
 }
 
 $userId = (int) $_SESSION['user_id'];
