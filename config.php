@@ -70,6 +70,20 @@ function requireAdminLogin() {
     }
 }
 
+// Browser tab icon: the company logo from System Information, or the bundled JESS logo
+function faviconTag() {
+    $info = getSystemInfo();
+    $logo = !empty($info['logo']) ? ltrim($info['logo'], '/') : '';
+    if ($logo === '' || !is_file(__DIR__ . '/' . $logo)) {
+        $logo = 'uploads/logo_jess.png';
+    }
+    $types = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+    $type = $types[strtolower(pathinfo($logo, PATHINFO_EXTENSION))] ?? 'image/png';
+    $href = htmlspecialchars('/' . $logo, ENT_QUOTES);
+    return '<link rel="icon" type="' . $type . '" href="' . $href . '">' . "\n"
+        . '    <link rel="apple-touch-icon" href="' . $href . '">';
+}
+
 // Google Sign-In is shown only when credentials are configured
 function isGoogleLoginEnabled() {
     return GOOGLE_CLIENT_ID !== '' && GOOGLE_CLIENT_SECRET !== '';
