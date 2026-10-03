@@ -7,6 +7,12 @@ echo     Sales and Procurement Management System Launcher
 echo ===================================================
 echo.
 
+REM 0. Load local secrets (GOOGLE_CLIENT_ID, DB_*, ...) from .env.local - not committed to git
+if exist ".env.local" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%a in (".env.local") do set "%%a=%%b"
+    echo [OK] Loaded settings from .env.local
+)
+
 REM 1. Check & Start MySQL
 tasklist /FI "IMAGENAME eq mysqld.exe" 2>nul | find /I "mysqld.exe" >nul
 if %ERRORLEVEL% equ 0 (

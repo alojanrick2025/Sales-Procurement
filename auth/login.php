@@ -3,6 +3,12 @@ require_once __DIR__ . '/../config.php';
 
 $error = '';
 
+// Error passed back from the Google Sign-In flow
+if (!empty($_SESSION['login_error'])) {
+    $error = $_SESSION['login_error'];
+    unset($_SESSION['login_error']);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
@@ -171,6 +177,35 @@ $sysName = !empty($systemInfo['name']) ? $systemInfo['name'] : 'Sales and Procur
             box-shadow: 0 6px 20px rgba(215, 255, 224, 0.3);
             transform: translateY(-2px);
         }
+        .login-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: rgba(255, 255, 255, 0.45);
+            font-size: 0.8rem;
+            margin: 20px 0;
+        }
+        .login-divider::before,
+        .login-divider::after {
+            content: '';
+            flex: 1;
+            border-top: 1px solid #263B30;
+        }
+        .btn-google {
+            background: #1B2A22;
+            color: #ffffff;
+            font-weight: 500;
+            border: 1px solid #263B30;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+        .btn-google:hover {
+            background: #ffffff;
+            color: #16231D;
+            border-color: #ffffff;
+        }
     </style>
 </head>
 <body>
@@ -220,6 +255,13 @@ $sysName = !empty($systemInfo['name']) ? $systemInfo['name'] : 'Sales and Procur
                                 <i class="ph-bold ph-sign-in"></i> Login to System
                             </button>
                         </form>
+
+                        <?php if (isGoogleLoginEnabled()): ?>
+                            <div class="login-divider">or</div>
+                            <a href="/auth/google_login.php" class="btn btn-google w-100 d-flex align-items-center justify-content-center gap-2">
+                                <i class="ph-bold ph-google-logo"></i> Sign in with Google
+                            </a>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

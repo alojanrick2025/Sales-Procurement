@@ -6,6 +6,11 @@ define('DB_PASS', getenv('DB_PASS') ?: '');
 define('DB_NAME', getenv('DB_NAME') ?: 'sales_procurement');
 define('DB_PORT', getenv('DB_PORT') ?: 3306);
 
+// Google Sign-In (OAuth 2.0) - set these as environment variables, never in code
+define('GOOGLE_CLIENT_ID', getenv('GOOGLE_CLIENT_ID') ?: '');
+define('GOOGLE_CLIENT_SECRET', getenv('GOOGLE_CLIENT_SECRET') ?: '');
+define('GOOGLE_REDIRECT_URI', getenv('GOOGLE_REDIRECT_URI') ?: '');
+
 // Create database connection
 function getDBConnection() {
     try {
@@ -62,6 +67,23 @@ function requireAdminLogin() {
         header('Location: /auth/login.php');
         exit();
     }
+}
+
+// Google Sign-In is shown only when credentials are configured
+function isGoogleLoginEnabled() {
+    return GOOGLE_CLIENT_ID !== '' && GOOGLE_CLIENT_SECRET !== '';
+}
+
+// Callback URL registered in Google Cloud Console (must match exactly)
+function getGoogleRedirectUri() {
+    if (GOOGLE_REDIRECT_URI !== '') {
+        return GOOGLE_REDIRECT_URI;
+    }
+    // Render terminates HTTPS at its proxy and forwards plain HTTP
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    $scheme = $https ? 'https' : 'http';
+    return $scheme . '://' . $_SERVER['HTTP_HOST'] . '/auth/google_callback.php';
 }
 
 // CSRF Protection Functions
