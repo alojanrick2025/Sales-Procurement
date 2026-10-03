@@ -2,17 +2,33 @@
 /**
  * Two-Factor Authentication by email OTP.
  * A 6-digit code is emailed to the user's account email and expires after 2 minutes.
- * Codes are kept (hashed) in the server-side session, so no database changes are needed.
+ * While a code is still valid no new email is sent - a new code can be requested
+ * only after it expires. Codes live in the `two_factor_codes` table, so this holds
+ * across browsers, repeated logins and server restarts.
  */
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/mailer.php';
 
-define('TFA_CODE_TTL', 120);       // seconds a code stays valid
-define('TFA_RESEND_COOLDOWN', 30); // seconds between "resend code" requests
-define('TFA_MAX_SENDS', 5);        // codes per login attempt
-define('TFA_MAX_ATTEMPTS', 5);     // wrong codes per issued code
+define('TFA_CODE_TTL', 120);       // seconds a code stays valid (also the resend wait)
+define('TFA_MAX_ATTEMPTS', 5);     // wrong codes allowed per issued code
 define('TFA_PENDING_TTL', 600);    // seconds to finish the whole verification step
+
+// Create the codes table on first use (no manual migration needed)
+function tfaEnsureSchema($conn) {
+    static $done = false;
+    if (!$done) {
+        $conn->query("CREATE TABLE IF NOT EXISTS two_factor_codes (
+            user_id INT NOT NULL,
+            purpose VARCHAR(20) NOT NULL,
+            code_hash CHAR(64) NOT NULL,
+            expires_at BIGINT NOT NULL,
+            attempts INT NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, purpose)
+        )");
+        $done = true;
+    }
+}
 
 // System-wide switch stored in system_info
 function tfaIsEnabled($conn) {
@@ -57,23 +73,54 @@ function tfaMaskEmail($email) {
     return $visible . '@' . $domain;
 }
 
+// 95 -> "1:35"
+function tfaFormatWait($seconds) {
+    return intdiv($seconds, 60) . ':' . str_pad((string) ($seconds % 60), 2, '0', STR_PAD_LEFT);
+}
+
+function tfaHashCode($userId, $purpose, $code) {
+    return hash('sha256', $userId . '|' . $purpose . '|' . $code);
+}
+
 /**
- * Generate a code for $purpose ('login' or 'settings'), email it, and remember its hash.
- * Returns [true, ''] or [false, 'reason'].
+ * The current, unexpired code for this user and purpose, or null.
+ * Returns ['expires_at' => int, 'attempts' => int, 'seconds_left' => int].
+ */
+function tfaCodeInfo($purpose, $userId) {
+    $conn = getDBConnection();
+    tfaEnsureSchema($conn);
+    $stmt = $conn->prepare("SELECT expires_at, attempts FROM two_factor_codes WHERE user_id = ? AND purpose = ?");
+    $stmt->bind_param("is", $userId, $purpose);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    $conn->close();
+
+    if (!$row || (int) $row['expires_at'] <= time()) {
+        return null;
+    }
+    return [
+        'expires_at'   => (int) $row['expires_at'],
+        'attempts'     => (int) $row['attempts'],
+        'seconds_left' => (int) $row['expires_at'] - time(),
+    ];
+}
+
+/**
+ * Email a new code for $purpose ('login' or 'settings') - unless one is still valid.
+ * Returns ['status' => 'sent'|'already_sent'|'error', 'message' => string].
  */
 function tfaSendCode($purpose, $userId, $email, $fullName) {
-    $existing = $_SESSION['tfa_otp'][$purpose] ?? null;
-    $sameUser = $existing && $existing['user_id'] === $userId;
-    if ($sameUser && time() - $existing['sent_at'] < TFA_RESEND_COOLDOWN) {
-        $wait = TFA_RESEND_COOLDOWN - (time() - $existing['sent_at']);
-        return [false, "Please wait $wait seconds before requesting a new code."];
-    }
-    $sends = $sameUser ? $existing['sends'] : 0;
-    if ($sends >= TFA_MAX_SENDS) {
-        return [false, 'Too many codes requested. Please log in again.'];
+    $current = tfaCodeInfo($purpose, $userId);
+    if ($current) {
+        $wait = tfaFormatWait($current['seconds_left']);
+        if ($current['attempts'] >= TFA_MAX_ATTEMPTS) {
+            return ['status' => 'error', 'message' => "Too many incorrect codes. Please wait $wait before trying again."];
+        }
+        return ['status' => 'already_sent', 'message' => "A code was already sent to " . tfaMaskEmail($email) . ". You can request a new code in $wait."];
     }
     if ($email === '') {
-        return [false, 'Your account has no email address. Please contact the administrator.'];
+        return ['status' => 'error', 'message' => 'Your account has no email address. Please contact the administrator.'];
     }
 
     $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
@@ -91,19 +138,20 @@ function tfaSendCode($purpose, $userId, $email, $fullName) {
 
     [$ok, $error] = sendMail($email, $subject, $text, $html);
     if (!$ok) {
-        return [false, 'Could not send the code (' . $error . ').'];
+        return ['status' => 'error', 'message' => 'Could not send the code (' . $error . ').'];
     }
 
-    $_SESSION['tfa_otp'][$purpose] = [
-        'user_id'  => $userId,
-        'hash'     => hash('sha256', $code),
-        'expires'  => time() + TFA_CODE_TTL,
-        'sent_at'  => time(),
-        'sends'    => $sends + 1,
-        'attempts' => 0,
-        'email'    => $email,
-    ];
-    return [true, ''];
+    $conn = getDBConnection();
+    tfaEnsureSchema($conn);
+    $hash = tfaHashCode($userId, $purpose, $code);
+    $expires = time() + TFA_CODE_TTL;
+    $stmt = $conn->prepare("REPLACE INTO two_factor_codes (user_id, purpose, code_hash, expires_at, attempts) VALUES (?, ?, ?, ?, 0)");
+    $stmt->bind_param("issi", $userId, $purpose, $hash, $expires);
+    $stmt->execute();
+    $stmt->close();
+    $conn->close();
+
+    return ['status' => 'sent', 'message' => 'Code sent to ' . tfaMaskEmail($email) . '. It expires in ' . $minutes . ' minutes.'];
 }
 
 /**
@@ -111,32 +159,42 @@ function tfaSendCode($purpose, $userId, $email, $fullName) {
  * A code works only once.
  */
 function tfaCheckCode($purpose, $userId, $code) {
-    $otp = $_SESSION['tfa_otp'][$purpose] ?? null;
-    if (!$otp || $otp['user_id'] !== $userId) {
-        return 'none';
-    }
-    if ($otp['attempts'] >= TFA_MAX_ATTEMPTS) {
-        return 'locked';
-    }
-    if (time() > $otp['expires']) {
-        return 'expired';
-    }
-    $code = preg_replace('/\D/', '', (string) $code);
-    if (strlen($code) === 6 && hash_equals($otp['hash'], hash('sha256', $code))) {
-        unset($_SESSION['tfa_otp'][$purpose]);
-        return 'ok';
-    }
-    $_SESSION['tfa_otp'][$purpose]['attempts']++;
-    return $_SESSION['tfa_otp'][$purpose]['attempts'] >= TFA_MAX_ATTEMPTS ? 'locked' : 'invalid';
-}
+    $conn = getDBConnection();
+    tfaEnsureSchema($conn);
+    $stmt = $conn->prepare("SELECT code_hash, expires_at, attempts FROM two_factor_codes WHERE user_id = ? AND purpose = ?");
+    $stmt->bind_param("is", $userId, $purpose);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
 
-function tfaCodeInfo($purpose) {
-    return $_SESSION['tfa_otp'][$purpose] ?? null;
+    $result = 'none';
+    if ($row) {
+        $code = preg_replace('/\D/', '', (string) $code);
+        if ((int) $row['attempts'] >= TFA_MAX_ATTEMPTS) {
+            $result = 'locked';
+        } elseif ((int) $row['expires_at'] <= time()) {
+            $result = 'expired';
+        } elseif (strlen($code) === 6 && hash_equals($row['code_hash'], tfaHashCode($userId, $purpose, $code))) {
+            $stmt = $conn->prepare("DELETE FROM two_factor_codes WHERE user_id = ? AND purpose = ?");
+            $stmt->bind_param("is", $userId, $purpose);
+            $stmt->execute();
+            $stmt->close();
+            $result = 'ok';
+        } else {
+            $stmt = $conn->prepare("UPDATE two_factor_codes SET attempts = attempts + 1 WHERE user_id = ? AND purpose = ?");
+            $stmt->bind_param("is", $userId, $purpose);
+            $stmt->execute();
+            $stmt->close();
+            $result = (int) $row['attempts'] + 1 >= TFA_MAX_ATTEMPTS ? 'locked' : 'invalid';
+        }
+    }
+    $conn->close();
+    return $result;
 }
 
 // Final step of any login: create the authenticated session
 function completeLogin($user) {
-    unset($_SESSION['tfa_pending'], $_SESSION['tfa_otp']['login']);
+    unset($_SESSION['tfa_pending'], $_SESSION['tfa_notice']);
     session_regenerate_id(true);
     $_SESSION['user_id'] = $user['id'];
     $_SESSION['user_username'] = $user['username'];
@@ -148,7 +206,7 @@ function completeLogin($user) {
 
 /**
  * Called after the password (or Google) check succeeds.
- * Logs in directly, or emails a code and asks for it when 2FA is on.
+ * Logs in directly, or emails a code (if none is still valid) and asks for it when 2FA is on.
  */
 function beginLogin($user) {
     $conn = getDBConnection();
@@ -160,8 +218,14 @@ function beginLogin($user) {
         completeLogin($user);
     }
 
+    $result = tfaSendCode('login', (int) $user['id'], $email, $user['full_name']);
+    if ($result['status'] === 'error') {
+        $_SESSION['login_error'] = $result['message'];
+        header('Location: /auth/login.php');
+        exit();
+    }
+
     session_regenerate_id(true);
-    unset($_SESSION['tfa_otp']['login']);
     $_SESSION['tfa_pending'] = [
         'id'        => (int) $user['id'],
         'username'  => $user['username'],
@@ -170,14 +234,7 @@ function beginLogin($user) {
         'email'     => $email,
         'started'   => time(),
     ];
-
-    [$ok, $error] = tfaSendCode('login', (int) $user['id'], $email, $user['full_name']);
-    if (!$ok) {
-        unset($_SESSION['tfa_pending']);
-        $_SESSION['login_error'] = $error;
-        header('Location: /auth/login.php');
-        exit();
-    }
+    $_SESSION['tfa_notice'] = $result['status'] === 'already_sent' ? $result['message'] : '';
     header('Location: /auth/two_factor.php');
     exit();
 }

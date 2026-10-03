@@ -9,7 +9,7 @@ if (isLoggedIn()) {
 
 // Back to the login page, discarding the half-finished login
 function tfaAbort($message = '') {
-    unset($_SESSION['tfa_pending'], $_SESSION['tfa_otp']['login']);
+    unset($_SESSION['tfa_pending'], $_SESSION['tfa_notice']);
     if ($message !== '') {
         $_SESSION['login_error'] = $message;
     }
@@ -29,18 +29,21 @@ if (isset($_GET['cancel'])) {
 }
 
 $error = '';
-$notice = '';
+// Set by beginLogin() when a still-valid code was reused instead of sending another email
+$notice = $_SESSION['tfa_notice'] ?? '';
+unset($_SESSION['tfa_notice']);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $notice = '';
     if (!validateCsrfToken()) {
         $error = 'Session expired. Please try again.';
     } elseif (($_POST['action'] ?? '') === 'resend') {
-        [$ok, $sendError] = tfaSendCode('login', $pending['id'], $pending['email'], $pending['full_name']);
-        if ($ok) {
+        $result = tfaSendCode('login', $pending['id'], $pending['email'], $pending['full_name']);
+        if ($result['status'] === 'sent') {
             $notice = 'A new code has been sent.';
-        } elseif (strpos($sendError, 'Too many') === 0) {
-            tfaAbort($sendError);
+        } elseif ($result['status'] === 'already_sent') {
+            $notice = $result['message'];
         } else {
-            $error = $sendError;
+            $error = $result['message'];
         }
     } else {
         switch (tfaCheckCode('login', $pending['id'], $_POST['code'] ?? '')) {
@@ -57,15 +60,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'No active code. Click "Resend code" to get one.';
                 break;
             default:
-                $left = TFA_MAX_ATTEMPTS - (tfaCodeInfo('login')['attempts'] ?? 0);
+                $left = TFA_MAX_ATTEMPTS - (tfaCodeInfo('login', $pending['id'])['attempts'] ?? 0);
                 $error = 'Incorrect code. ' . $left . ' attempt' . ($left === 1 ? '' : 's') . ' left.';
         }
     }
 }
 
-$codeInfo = tfaCodeInfo('login');
-$secondsLeft = $codeInfo ? max(0, $codeInfo['expires'] - time()) : 0;
-$resendWait = $codeInfo ? max(0, TFA_RESEND_COOLDOWN - (time() - $codeInfo['sent_at'])) : 0;
+// A new code can be requested only after the current one expires
+$codeInfo = tfaCodeInfo('login', $pending['id']);
+$secondsLeft = $codeInfo ? $codeInfo['seconds_left'] : 0;
+$resendWait = $secondsLeft;
 $systemInfo = getSystemInfo();
 $companyName = !empty($systemInfo['company_name']) ? $systemInfo['company_name'] : 'JUSTLY ELECTRICAL SUPPLIES AND SERVICES';
 ?>
@@ -202,7 +206,9 @@ $companyName = !empty($systemInfo['company_name']) ? $systemInfo['company_name']
                     timer.classList.add('expired');
                 }
                 resend.disabled = wait > 0;
-                resendLabel.textContent = wait > 0 ? 'Resend code (' + wait + 's)' : 'Resend code';
+                resendLabel.textContent = wait > 0
+                    ? 'Resend code in ' + Math.floor(wait / 60) + ':' + String(wait % 60).padStart(2, '0')
+                    : 'Resend code';
                 left--; wait--;
             }
             tick();

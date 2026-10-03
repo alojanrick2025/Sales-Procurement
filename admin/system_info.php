@@ -241,8 +241,8 @@ $tfaEmail = tfaGetUserEmail($conn, (int) $_SESSION['user_id']);
 $tfaMailReady = isMailConfigured();
 $tfaFlash = $_SESSION['tfa_flash'] ?? null;
 unset($_SESSION['tfa_flash']);
-$tfaCode = tfaCodeInfo('settings');
-$tfaSecondsLeft = $tfaCode ? max(0, $tfaCode['expires'] - time()) : 0;
+$tfaCode = tfaCodeInfo('settings', (int) $_SESSION['user_id']);
+$tfaSecondsLeft = $tfaCode ? $tfaCode['seconds_left'] : 0;
 
 $conn->close();
 $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'], '/') : '';
@@ -476,8 +476,9 @@ $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'],
 <div class="card shadow-sm border-0 mt-4" id="two-factor">
     <div class="card-body p-4">
         <?php if ($tfaFlash): ?>
-            <div class="alert alert-<?php echo $tfaFlash['type'] === 'success' ? 'success' : 'danger'; ?> alert-dismissible fade show" role="alert">
-                <i class="ph-bold <?php echo $tfaFlash['type'] === 'success' ? 'ph-check-circle' : 'ph-warning-circle'; ?>"></i> <?php echo htmlspecialchars($tfaFlash['message']); ?>
+            <?php $tfaAlertType = in_array($tfaFlash['type'], ['success', 'info'], true) ? $tfaFlash['type'] : 'danger'; ?>
+            <div class="alert alert-<?php echo $tfaAlertType; ?> alert-dismissible fade show" role="alert">
+                <i class="ph-bold <?php echo $tfaAlertType === 'danger' ? 'ph-warning-circle' : ($tfaAlertType === 'info' ? 'ph-info' : 'ph-check-circle'); ?>"></i> <?php echo htmlspecialchars($tfaFlash['message']); ?>
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         <?php endif; ?>
@@ -521,8 +522,9 @@ $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'],
                     <form method="POST" action="/admin/two_factor_settings.php" class="mb-3">
                         <?php echo csrfField(); ?>
                         <input type="hidden" name="action" value="send">
-                        <button type="submit" class="btn btn-outline-primary">
-                            <i class="ph-bold ph-paper-plane-tilt"></i> <?php echo $tfaCode ? 'Resend Code' : 'Send Code'; ?>
+                        <!-- Disabled while a code is still valid; re-enabled by the countdown when it expires -->
+                        <button type="submit" class="btn btn-outline-primary" id="tfa_send_btn" <?php echo $tfaCode ? 'disabled' : ''; ?>>
+                            <i class="ph-bold ph-paper-plane-tilt"></i> <?php echo $tfaCode ? 'Code Sent' : 'Send Code'; ?>
                         </button>
                         <?php if ($tfaCode): ?>
                             <span class="small ms-2" id="tfa_settings_timer" data-seconds="<?php echo (int) $tfaSecondsLeft; ?>"></span>
@@ -639,13 +641,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const tfaTimer = document.getElementById('tfa_settings_timer');
     if (tfaTimer) {
         let left = parseInt(tfaTimer.dataset.seconds, 10);
+        const sendBtn = document.getElementById('tfa_send_btn');
         const tick = function() {
             if (left > 0) {
-                tfaTimer.textContent = 'Code expires in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+                tfaTimer.textContent = 'Code already sent - expires in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + '. You can send a new one after that.';
                 tfaTimer.className = 'small ms-2 text-success';
             } else {
                 tfaTimer.textContent = 'Code expired - send a new one.';
                 tfaTimer.className = 'small ms-2 text-danger';
+                if (sendBtn && sendBtn.disabled) {
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '<i class="ph-bold ph-paper-plane-tilt"></i> Send New Code';
+                }
             }
             left--;
         };

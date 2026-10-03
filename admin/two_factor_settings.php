@@ -27,11 +27,9 @@ if ($action === 'send') {
     $conn = getDBConnection();
     $email = tfaGetUserEmail($conn, $userId);
     $conn->close();
-    [$ok, $error] = tfaSendCode('settings', $userId, $email, $_SESSION['user_name'] ?? '');
-    if (!$ok) {
-        tfaSettingsDone('danger', $error, true);
-    }
-    tfaSettingsDone('success', 'Code sent to ' . tfaMaskEmail($email) . '. It expires in 2 minutes.', true);
+    $result = tfaSendCode('settings', $userId, $email, $_SESSION['user_name'] ?? '');
+    $type = ['sent' => 'success', 'already_sent' => 'info'][$result['status']] ?? 'danger';
+    tfaSettingsDone($type, $result['message'], true);
 }
 
 if ($action === 'enable' || $action === 'disable') {
@@ -39,13 +37,10 @@ if ($action === 'enable' || $action === 'disable') {
     $messages = [
         'invalid' => 'Incorrect code. Please try again.',
         'expired' => 'The code has expired. Click "Send Code" for a new one.',
-        'locked'  => 'Too many incorrect codes. Click "Send Code" for a new one.',
+        'locked'  => 'Too many incorrect codes. Send a new code once this one expires.',
         'none'    => 'Click "Send Code" first.',
     ];
     if ($result !== 'ok') {
-        if ($result === 'locked') {
-            unset($_SESSION['tfa_otp']['settings']);
-        }
         tfaSettingsDone('danger', $messages[$result] ?? 'Verification failed.', true);
     }
 
