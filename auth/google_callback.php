@@ -50,12 +50,20 @@ curl_setopt_array($ch, [
 ]);
 $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$curlError = curl_error($ch);
 curl_close($ch);
 
-$tokens = $response ? json_decode($response, true) : null;
+if ($response === false) {
+    error_log('Google token exchange failed: ' . $curlError);
+    googleLoginFail('Could not reach Google (' . $curlError . '). Please try again.');
+}
+
+$tokens = json_decode($response, true);
 if ($httpCode !== 200 || empty($tokens['id_token'])) {
     error_log('Google token exchange failed: HTTP ' . $httpCode . ' ' . $response);
-    googleLoginFail('Google Sign-In failed. Please try again.');
+    // Google's error code (e.g. invalid_client) is safe to show and explains the cause
+    $reason = $tokens['error'] ?? ('HTTP ' . $httpCode);
+    googleLoginFail('Google Sign-In failed (' . $reason . '). Please try again.');
 }
 
 // The ID token came directly from Google over TLS, so its signature need not be
@@ -67,7 +75,7 @@ $claims = count($parts) === 3
 
 $validIssuer = in_array($claims['iss'] ?? '', ['https://accounts.google.com', 'accounts.google.com'], true);
 if (!$claims || !$validIssuer || ($claims['aud'] ?? '') !== GOOGLE_CLIENT_ID || ($claims['exp'] ?? 0) < time()) {
-    googleLoginFail('Google Sign-In failed. Please try again.');
+    googleLoginFail('Google Sign-In failed (invalid token). Please try again.');
 }
 
 $email = $claims['email'] ?? '';

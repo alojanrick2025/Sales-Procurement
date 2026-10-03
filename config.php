@@ -7,9 +7,10 @@ define('DB_NAME', getenv('DB_NAME') ?: 'sales_procurement');
 define('DB_PORT', getenv('DB_PORT') ?: 3306);
 
 // Google Sign-In (OAuth 2.0) - set these as environment variables, never in code
-define('GOOGLE_CLIENT_ID', getenv('GOOGLE_CLIENT_ID') ?: '');
-define('GOOGLE_CLIENT_SECRET', getenv('GOOGLE_CLIENT_SECRET') ?: '');
-define('GOOGLE_REDIRECT_URI', getenv('GOOGLE_REDIRECT_URI') ?: '');
+// trim() guards against stray spaces/newlines pasted into the hosting dashboard
+define('GOOGLE_CLIENT_ID', trim(getenv('GOOGLE_CLIENT_ID') ?: ''));
+define('GOOGLE_CLIENT_SECRET', trim(getenv('GOOGLE_CLIENT_SECRET') ?: ''));
+define('GOOGLE_REDIRECT_URI', trim(getenv('GOOGLE_REDIRECT_URI') ?: ''));
 
 // Create database connection
 function getDBConnection() {
