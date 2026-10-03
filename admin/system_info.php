@@ -236,18 +236,13 @@ if ($logRes) {
 
 // Two-Factor Authentication status for the toggle section
 require_once __DIR__ . '/../includes/two_factor.php';
-tfaEnsureSchema($conn);
 $tfaEnabled = tfaIsEnabled($conn);
-$tfaStored = tfaGetUserSecret($conn, (int) $_SESSION['user_id']);
-$tfaHasSecret = !empty($tfaStored['totp_secret']);
+$tfaEmail = tfaGetUserEmail($conn, (int) $_SESSION['user_id']);
+$tfaMailReady = isMailConfigured();
 $tfaFlash = $_SESSION['tfa_flash'] ?? null;
 unset($_SESSION['tfa_flash']);
-// Admin has no authenticator yet: prepare one to scan before turning 2FA on
-if (!$tfaHasSecret && empty($_SESSION['tfa_setup_secret'])) {
-    $_SESSION['tfa_setup_secret'] = tfaGenerateSecret();
-}
-$tfaSetupSecret = $tfaHasSecret ? '' : $_SESSION['tfa_setup_secret'];
-$tfaOtpUri = $tfaHasSecret ? '' : tfaProvisioningUri($tfaSetupSecret, $_SESSION['user_username'], tfaIssuerName());
+$tfaCode = tfaCodeInfo('settings');
+$tfaSecondsLeft = $tfaCode ? max(0, $tfaCode['expires'] - time()) : 0;
 
 $conn->close();
 $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'], '/') : '';
@@ -497,7 +492,7 @@ $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'],
                         <span class="badge bg-secondary">OFF</span>
                     <?php endif; ?>
                 </h5>
-                <p class="text-muted small mb-0">When on, every user must enter a 6-digit code from an authenticator app after their password or Google sign-in.</p>
+                <p class="text-muted small mb-0">When on, every user must enter a 6-digit code sent to their email (valid for 2 minutes) after their password or Google sign-in.</p>
             </div>
             <div class="form-check form-switch mt-2 mt-sm-0">
                 <input class="form-check-input" type="checkbox" role="switch" id="toggle_two_factor" <?php echo $tfaEnabled ? 'checked' : ''; ?> style="cursor: pointer; width: 2.6rem; height: 1.35rem;">
@@ -509,47 +504,51 @@ $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'],
 
         <div id="two_factor_panel" class="mt-3" style="display: none;">
             <div class="p-3 p-md-4 rounded-3 border" style="background-color: #F8FAF9; border-color: #E3E8E5 !important;">
-                <form method="POST" action="/admin/two_factor_settings.php" autocomplete="off">
-                    <?php echo csrfField(); ?>
-                    <input type="hidden" name="action" value="<?php echo $tfaEnabled ? 'disable' : 'enable'; ?>">
-
-                    <?php if (!$tfaEnabled && !$tfaHasSecret): ?>
-                        <div class="row g-4 align-items-center mb-3">
-                            <div class="col-md-auto text-center">
-                                <div class="d-inline-block p-2 bg-white border rounded-3"><div id="tfa_setup_qr"></div></div>
-                            </div>
-                            <div class="col-md">
-                                <ol class="small mb-2 ps-3">
-                                    <li>Install <strong>Google Authenticator</strong> or <strong>Microsoft Authenticator</strong> on your phone.</li>
-                                    <li>Scan this QR code with the app.</li>
-                                    <li>Enter the 6-digit code it shows below and click <strong>Turn On</strong>.</li>
-                                </ol>
-                                <div class="small text-muted">Can't scan? Enter this key manually:</div>
-                                <code class="d-inline-block mt-1 p-2 bg-white border rounded-2" style="letter-spacing: 1px;"><?php echo htmlspecialchars(trim(chunk_split($tfaSetupSecret, 4, ' '))); ?></code>
-                            </div>
-                        </div>
-                    <?php elseif (!$tfaEnabled): ?>
-                        <p class="small mb-3">Enter the 6-digit code from your authenticator app to turn on two-factor authentication.</p>
-                    <?php else: ?>
-                        <p class="small mb-3">Enter the 6-digit code from your authenticator app to turn off two-factor authentication.</p>
-                    <?php endif; ?>
-
-                    <div class="d-flex flex-wrap gap-2 align-items-center">
-                        <input type="text" class="form-control" name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" required placeholder="6-digit code" autocomplete="one-time-code" style="max-width: 180px; letter-spacing: 3px;">
-                        <?php if ($tfaEnabled): ?>
-                            <button type="submit" class="btn btn-danger px-4"><i class="ph-bold ph-shield-slash"></i> Turn Off</button>
-                        <?php else: ?>
-                            <button type="submit" class="btn btn-primary px-4"><i class="ph-bold ph-shield-check"></i> Turn On</button>
-                        <?php endif; ?>
-                        <button type="button" class="btn btn-outline-secondary" id="two_factor_cancel">Cancel</button>
+                <?php if (!$tfaMailReady): ?>
+                    <div class="alert alert-warning small mb-0">
+                        <i class="ph-bold ph-warning me-1"></i>Email sending is not set up yet, so codes cannot be delivered. Add the Gmail settings to the server's environment variables first (see <strong>GMAIL-OTP-SETUP.md</strong>).
                     </div>
+                <?php elseif (empty($tfaEmail)): ?>
+                    <div class="alert alert-warning small mb-0">
+                        <i class="ph-bold ph-warning me-1"></i>Your account has no email address. Add one in <strong>My Profile</strong> first.
+                    </div>
+                <?php else: ?>
+                    <p class="small mb-3">
+                        <strong>Step 1:</strong> Send a verification code to <strong><?php echo htmlspecialchars(tfaMaskEmail($tfaEmail)); ?></strong>.
+                        <strong>Step 2:</strong> Enter it below to turn two-factor authentication <?php echo $tfaEnabled ? 'off' : 'on'; ?>.
+                    </p>
+
+                    <form method="POST" action="/admin/two_factor_settings.php" class="mb-3">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="action" value="send">
+                        <button type="submit" class="btn btn-outline-primary">
+                            <i class="ph-bold ph-paper-plane-tilt"></i> <?php echo $tfaCode ? 'Resend Code' : 'Send Code'; ?>
+                        </button>
+                        <?php if ($tfaCode): ?>
+                            <span class="small ms-2" id="tfa_settings_timer" data-seconds="<?php echo (int) $tfaSecondsLeft; ?>"></span>
+                        <?php endif; ?>
+                    </form>
+
+                    <form method="POST" action="/admin/two_factor_settings.php" autocomplete="off">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="action" value="<?php echo $tfaEnabled ? 'disable' : 'enable'; ?>">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <input type="text" class="form-control" name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" required placeholder="6-digit code" autocomplete="one-time-code" style="max-width: 180px; letter-spacing: 3px;">
+                            <?php if ($tfaEnabled): ?>
+                                <button type="submit" class="btn btn-danger px-4"><i class="ph-bold ph-shield-slash"></i> Turn Off</button>
+                            <?php else: ?>
+                                <button type="submit" class="btn btn-primary px-4"><i class="ph-bold ph-shield-check"></i> Turn On</button>
+                            <?php endif; ?>
+                            <button type="button" class="btn btn-outline-secondary" id="two_factor_cancel">Cancel</button>
+                        </div>
+                    </form>
 
                     <?php if (!$tfaEnabled): ?>
                         <div class="form-text small text-muted mt-2">
-                            <i class="ph-bold ph-info me-1"></i>Other users will be asked to scan their own QR code the next time they log in.
+                            <i class="ph-bold ph-info me-1"></i>Make sure every user has a correct email address in User Management - codes are sent there.
                         </div>
                     <?php endif; ?>
-                </form>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -586,10 +585,6 @@ $logoDisplayPath =!empty($systemInfo['logo']) ? '/' . ltrim($systemInfo['logo'],
 </div>
 <?php endif; ?>
 
-<?php if (!$tfaHasSecret): ?>
-<!-- Draws the 2FA QR code in the browser so the secret never leaves the page -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<?php endif; ?>
 <script>
 function handleLogoFileSelect(input) {
     if (input.files && input.files[0]) {
@@ -633,18 +628,29 @@ document.addEventListener('DOMContentLoaded', function() {
     const tfaSwitch = document.getElementById('toggle_two_factor');
     const tfaPanel = document.getElementById('two_factor_panel');
     const tfaCancel = document.getElementById('two_factor_cancel');
-    let qrDrawn = false;
     function showTfaPanel(show) {
         tfaPanel.style.display = show ? 'block' : 'none';
         if (show) {
-            const qrEl = document.getElementById('tfa_setup_qr');
-            if (qrEl && !qrDrawn && window.QRCode) {
-                new QRCode(qrEl, { text: <?php echo json_encode($tfaOtpUri, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES); ?>, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
-                qrDrawn = true;
-            }
             const codeInput = tfaPanel.querySelector('input[name="code"]');
             if (codeInput) codeInput.focus();
         }
+    }
+    // Countdown for the emailed code
+    const tfaTimer = document.getElementById('tfa_settings_timer');
+    if (tfaTimer) {
+        let left = parseInt(tfaTimer.dataset.seconds, 10);
+        const tick = function() {
+            if (left > 0) {
+                tfaTimer.textContent = 'Code expires in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+                tfaTimer.className = 'small ms-2 text-success';
+            } else {
+                tfaTimer.textContent = 'Code expired - send a new one.';
+                tfaTimer.className = 'small ms-2 text-danger';
+            }
+            left--;
+        };
+        tick();
+        setInterval(tick, 1000);
     }
     if (tfaSwitch && tfaPanel) {
         tfaSwitch.addEventListener('click', function(e) {
@@ -652,8 +658,8 @@ document.addEventListener('DOMContentLoaded', function() {
             showTfaPanel(tfaPanel.style.display === 'none');
         });
         if (tfaCancel) tfaCancel.addEventListener('click', function() { showTfaPanel(false); });
-        <?php if ($tfaFlash && $tfaFlash['type'] !== 'success'): ?>
-        showTfaPanel(true); // wrong code: reopen so the admin can retry
+        <?php if ($tfaFlash && !empty($tfaFlash['open'])): ?>
+        showTfaPanel(true); // code sent or wrong code: keep the panel open
         <?php endif; ?>
     }
 });

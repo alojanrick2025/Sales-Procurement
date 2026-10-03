@@ -1,60 +1,55 @@
 <?php
 /**
- * Turns system-wide Two-Factor Authentication on or off (System Information page).
- * The admin must prove they have a working authenticator before either change,
- * so turning it on can never lock them out.
+ * Turns system-wide email Two-Factor Authentication on or off (System Information page).
+ * The admin must enter a code emailed to them first, which proves email delivery
+ * works - so turning 2FA on can never lock everyone out.
  */
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/two_factor.php';
 requireAdminLogin();
 requirePostWithCsrf();
 
-function tfaSettingsDone($type, $message) {
-    $_SESSION['tfa_flash'] = ['type' => $type, 'message' => $message];
+function tfaSettingsDone($type, $message, $openPanel = false) {
+    $_SESSION['tfa_flash'] = ['type' => $type, 'message' => $message, 'open' => $openPanel];
     header('Location: /admin/system_info.php#two-factor');
     exit();
 }
 
-$conn = getDBConnection();
-tfaEnsureSchema($conn);
 $userId = (int) $_SESSION['user_id'];
-$stored = tfaGetUserSecret($conn, $userId);
-$hasSecret = !empty($stored['totp_secret']);
 $action = $_POST['action'] ?? '';
-$code = $_POST['code'] ?? '';
 
-if ($action === 'enable') {
-    // Use the admin's existing authenticator, or the new one shown on the page
-    $secret = $hasSecret ? $stored['totp_secret'] : ($_SESSION['tfa_setup_secret'] ?? '');
-    if ($secret === '') {
-        $conn->close();
-        tfaSettingsDone('danger', 'Setup expired. Please scan the QR code again.');
-    }
-    $step = tfaVerifyCode($secret, $code, $hasSecret ? $stored['totp_last_step'] : null);
-    if ($step === false) {
-        $conn->close();
-        tfaSettingsDone('danger', 'Incorrect code. Two-factor authentication was not turned on.');
-    }
-    tfaSaveUserSecret($conn, $userId, $secret, $step);
-    tfaSetEnabled($conn, true);
-    unset($_SESSION['tfa_setup_secret']);
+if ($action === 'send') {
+    $conn = getDBConnection();
+    $email = tfaGetUserEmail($conn, $userId);
     $conn->close();
-    tfaSettingsDone('success', 'Two-factor authentication is now ON. All users will need an authenticator code to log in.');
+    [$ok, $error] = tfaSendCode('settings', $userId, $email, $_SESSION['user_name'] ?? '');
+    if (!$ok) {
+        tfaSettingsDone('danger', $error, true);
+    }
+    tfaSettingsDone('success', 'Code sent to ' . tfaMaskEmail($email) . '. It expires in 2 minutes.', true);
 }
 
-if ($action === 'disable') {
-    if ($hasSecret) {
-        $step = tfaVerifyCode($stored['totp_secret'], $code, $stored['totp_last_step']);
-        if ($step === false) {
-            $conn->close();
-            tfaSettingsDone('danger', 'Incorrect code. Two-factor authentication is still on.');
+if ($action === 'enable' || $action === 'disable') {
+    $result = tfaCheckCode('settings', $userId, $_POST['code'] ?? '');
+    $messages = [
+        'invalid' => 'Incorrect code. Please try again.',
+        'expired' => 'The code has expired. Click "Send Code" for a new one.',
+        'locked'  => 'Too many incorrect codes. Click "Send Code" for a new one.',
+        'none'    => 'Click "Send Code" first.',
+    ];
+    if ($result !== 'ok') {
+        if ($result === 'locked') {
+            unset($_SESSION['tfa_otp']['settings']);
         }
-        tfaMarkStepUsed($conn, $userId, $step);
+        tfaSettingsDone('danger', $messages[$result] ?? 'Verification failed.', true);
     }
-    tfaSetEnabled($conn, false);
+
+    $conn = getDBConnection();
+    tfaSetEnabled($conn, $action === 'enable');
     $conn->close();
-    tfaSettingsDone('success', 'Two-factor authentication is now OFF.');
+    tfaSettingsDone('success', $action === 'enable'
+        ? 'Two-factor authentication is now ON. Users will receive a code by email each time they log in.'
+        : 'Two-factor authentication is now OFF.');
 }
 
-$conn->close();
 tfaSettingsDone('danger', 'Unknown action.');

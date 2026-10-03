@@ -1,28 +1,18 @@
 <?php
 /**
- * Two-Factor Authentication (TOTP, RFC 6238)
- * Works with Google Authenticator, Microsoft Authenticator, Authy, etc.
+ * Two-Factor Authentication by email OTP.
+ * A 6-digit code is emailed to the user's account email and expires after 2 minutes.
+ * Codes are kept (hashed) in the server-side session, so no database changes are needed.
  */
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/mailer.php';
 
-define('TFA_PERIOD', 30);          // seconds per code
-define('TFA_DIGITS', 6);
-define('TFA_PENDING_TTL', 300);    // seconds allowed to enter the code after password login
-define('TFA_MAX_ATTEMPTS', 5);
-
-// Add the 2FA columns to `users` on first use (no manual migration needed)
-function tfaEnsureSchema($conn) {
-    static $done = false;
-    if ($done) {
-        return;
-    }
-    $res = $conn->query("SHOW COLUMNS FROM users LIKE 'totp_secret'");
-    if ($res && $res->num_rows === 0) {
-        $conn->query("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64) NULL, ADD COLUMN totp_last_step BIGINT NULL");
-    }
-    $done = true;
-}
+define('TFA_CODE_TTL', 120);       // seconds a code stays valid
+define('TFA_RESEND_COOLDOWN', 30); // seconds between "resend code" requests
+define('TFA_MAX_SENDS', 5);        // codes per login attempt
+define('TFA_MAX_ATTEMPTS', 5);     // wrong codes per issued code
+define('TFA_PENDING_TTL', 600);    // seconds to finish the whole verification step
 
 // System-wide switch stored in system_info
 function tfaIsEnabled($conn) {
@@ -51,113 +41,102 @@ function tfaSetEnabled($conn, $enabled) {
     $stmt->close();
 }
 
-function tfaGenerateSecret() {
-    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-    $bytes = random_bytes(20);
-    $bits = '';
-    foreach (str_split($bytes) as $byte) {
-        $bits .= str_pad(decbin(ord($byte)), 8, '0', STR_PAD_LEFT);
-    }
-    $secret = '';
-    foreach (str_split($bits, 5) as $chunk) {
-        $secret .= $alphabet[bindec(str_pad($chunk, 5, '0'))];
-    }
-    return $secret;
-}
-
-function tfaBase32Decode($secret) {
-    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-    $secret = strtoupper(preg_replace('/[^A-Za-z2-7]/', '', $secret));
-    $bits = '';
-    foreach (str_split($secret) as $char) {
-        $bits .= str_pad(decbin(strpos($alphabet, $char)), 5, '0', STR_PAD_LEFT);
-    }
-    $bytes = '';
-    foreach (str_split($bits, 8) as $chunk) {
-        if (strlen($chunk) === 8) {
-            $bytes .= chr(bindec($chunk));
-        }
-    }
-    return $bytes;
-}
-
-function tfaCodeAt($secret, $step) {
-    $key = tfaBase32Decode($secret);
-    $counter = pack('N2', 0, $step);
-    $hash = hash_hmac('sha1', $counter, $key, true);
-    $offset = ord($hash[19]) & 0x0F;
-    $value = ((ord($hash[$offset]) & 0x7F) << 24)
-        | (ord($hash[$offset + 1]) << 16)
-        | (ord($hash[$offset + 2]) << 8)
-        | ord($hash[$offset + 3]);
-    return str_pad((string) ($value % (10 ** TFA_DIGITS)), TFA_DIGITS, '0', STR_PAD_LEFT);
-}
-
-/**
- * Check a code, allowing one step of clock drift either way.
- * Returns the matched time step, or false. Steps at or before $lastStep are
- * rejected so a code cannot be reused.
- */
-function tfaVerifyCode($secret, $code, $lastStep = null) {
-    $code = preg_replace('/\s+/', '', (string) $code);
-    if ($secret === '' || !preg_match('/^\d{' . TFA_DIGITS . '}$/', $code)) {
-        return false;
-    }
-    $current = intdiv(time(), TFA_PERIOD);
-    for ($drift = -1; $drift <= 1; $drift++) {
-        $step = $current + $drift;
-        if ($lastStep !== null && $step <= $lastStep) {
-            continue;
-        }
-        if (hash_equals(tfaCodeAt($secret, $step), $code)) {
-            return $step;
-        }
-    }
-    return false;
-}
-
-// otpauth:// link encoded in the QR code that authenticator apps scan
-function tfaProvisioningUri($secret, $accountName, $issuer) {
-    $label = rawurlencode($issuer) . ':' . rawurlencode($accountName);
-    return 'otpauth://totp/' . $label . '?' . http_build_query([
-        'secret' => $secret,
-        'issuer' => $issuer,
-        'period' => TFA_PERIOD,
-        'digits' => TFA_DIGITS,
-    ]);
-}
-
-function tfaIssuerName() {
-    $info = getSystemInfo();
-    return !empty($info['short_name']) ? $info['short_name'] : 'Sales and Procurement';
-}
-
-function tfaGetUserSecret($conn, $userId) {
-    $stmt = $conn->prepare("SELECT totp_secret, totp_last_step FROM users WHERE id = ?");
+function tfaGetUserEmail($conn, $userId) {
+    $stmt = $conn->prepare("SELECT email FROM users WHERE id = ?");
     $stmt->bind_param("i", $userId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    return $row ?: ['totp_secret' => null, 'totp_last_step' => null];
+    return $row['email'] ?? '';
 }
 
-function tfaSaveUserSecret($conn, $userId, $secret, $step) {
-    $stmt = $conn->prepare("UPDATE users SET totp_secret = ?, totp_last_step = ? WHERE id = ?");
-    $stmt->bind_param("sii", $secret, $step, $userId);
-    $stmt->execute();
-    $stmt->close();
+// j******t@gmail.com - shown on screen so users know where the code went
+function tfaMaskEmail($email) {
+    [$local, $domain] = array_pad(explode('@', $email, 2), 2, '');
+    $visible = strlen($local) <= 2 ? substr($local, 0, 1) : $local[0] . str_repeat('*', strlen($local) - 2) . substr($local, -1);
+    return $visible . '@' . $domain;
 }
 
-function tfaMarkStepUsed($conn, $userId, $step) {
-    $stmt = $conn->prepare("UPDATE users SET totp_last_step = ? WHERE id = ?");
-    $stmt->bind_param("ii", $step, $userId);
-    $stmt->execute();
-    $stmt->close();
+/**
+ * Generate a code for $purpose ('login' or 'settings'), email it, and remember its hash.
+ * Returns [true, ''] or [false, 'reason'].
+ */
+function tfaSendCode($purpose, $userId, $email, $fullName) {
+    $existing = $_SESSION['tfa_otp'][$purpose] ?? null;
+    $sameUser = $existing && $existing['user_id'] === $userId;
+    if ($sameUser && time() - $existing['sent_at'] < TFA_RESEND_COOLDOWN) {
+        $wait = TFA_RESEND_COOLDOWN - (time() - $existing['sent_at']);
+        return [false, "Please wait $wait seconds before requesting a new code."];
+    }
+    $sends = $sameUser ? $existing['sends'] : 0;
+    if ($sends >= TFA_MAX_SENDS) {
+        return [false, 'Too many codes requested. Please log in again.'];
+    }
+    if ($email === '') {
+        return [false, 'Your account has no email address. Please contact the administrator.'];
+    }
+
+    $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    $minutes = intdiv(TFA_CODE_TTL, 60);
+    $company = getSystemInfo()['company_name'] ?? 'Sales and Procurement Management System';
+    $subject = "Your verification code: $code";
+    $text = "Hi $fullName,\n\nYour verification code is: $code\n\nIt expires in $minutes minutes. "
+        . "If you did not try to log in, change your password immediately.\n\n$company";
+    $html = '<div style="font-family:Arial,sans-serif;max-width:420px;margin:auto;padding:24px;border:1px solid #e3e8e5;border-radius:12px">'
+        . '<h2 style="color:#16231D;margin:0 0 8px">Verification Code</h2>'
+        . '<p style="color:#444">Hi ' . htmlspecialchars($fullName) . ', use this code to finish logging in:</p>'
+        . '<div style="font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;background:#F0FFF3;color:#16231D;padding:16px;border-radius:8px">' . $code . '</div>'
+        . '<p style="color:#666;font-size:13px">This code expires in <b>' . $minutes . ' minutes</b>. If you did not try to log in, change your password immediately.</p>'
+        . '<p style="color:#999;font-size:12px;margin-top:24px">' . htmlspecialchars($company) . '</p></div>';
+
+    [$ok, $error] = sendMail($email, $subject, $text, $html);
+    if (!$ok) {
+        return [false, 'Could not send the code (' . $error . ').'];
+    }
+
+    $_SESSION['tfa_otp'][$purpose] = [
+        'user_id'  => $userId,
+        'hash'     => hash('sha256', $code),
+        'expires'  => time() + TFA_CODE_TTL,
+        'sent_at'  => time(),
+        'sends'    => $sends + 1,
+        'attempts' => 0,
+        'email'    => $email,
+    ];
+    return [true, ''];
+}
+
+/**
+ * Check a code. Returns 'ok', 'invalid', 'expired', 'locked' or 'none'.
+ * A code works only once.
+ */
+function tfaCheckCode($purpose, $userId, $code) {
+    $otp = $_SESSION['tfa_otp'][$purpose] ?? null;
+    if (!$otp || $otp['user_id'] !== $userId) {
+        return 'none';
+    }
+    if ($otp['attempts'] >= TFA_MAX_ATTEMPTS) {
+        return 'locked';
+    }
+    if (time() > $otp['expires']) {
+        return 'expired';
+    }
+    $code = preg_replace('/\D/', '', (string) $code);
+    if (strlen($code) === 6 && hash_equals($otp['hash'], hash('sha256', $code))) {
+        unset($_SESSION['tfa_otp'][$purpose]);
+        return 'ok';
+    }
+    $_SESSION['tfa_otp'][$purpose]['attempts']++;
+    return $_SESSION['tfa_otp'][$purpose]['attempts'] >= TFA_MAX_ATTEMPTS ? 'locked' : 'invalid';
+}
+
+function tfaCodeInfo($purpose) {
+    return $_SESSION['tfa_otp'][$purpose] ?? null;
 }
 
 // Final step of any login: create the authenticated session
 function completeLogin($user) {
-    unset($_SESSION['tfa_pending'], $_SESSION['tfa_enroll_secret']);
+    unset($_SESSION['tfa_pending'], $_SESSION['tfa_otp']['login']);
     session_regenerate_id(true);
     $_SESSION['user_id'] = $user['id'];
     $_SESSION['user_username'] = $user['username'];
@@ -169,12 +148,12 @@ function completeLogin($user) {
 
 /**
  * Called after the password (or Google) check succeeds.
- * Logs in directly, or hands off to the code prompt when 2FA is on.
+ * Logs in directly, or emails a code and asks for it when 2FA is on.
  */
 function beginLogin($user) {
     $conn = getDBConnection();
-    tfaEnsureSchema($conn);
     $enabled = tfaIsEnabled($conn);
+    $email = $enabled ? tfaGetUserEmail($conn, $user['id']) : '';
     $conn->close();
 
     if (!$enabled) {
@@ -182,14 +161,23 @@ function beginLogin($user) {
     }
 
     session_regenerate_id(true);
+    unset($_SESSION['tfa_otp']['login']);
     $_SESSION['tfa_pending'] = [
-        'id'        => $user['id'],
+        'id'        => (int) $user['id'],
         'username'  => $user['username'],
         'full_name' => $user['full_name'],
         'user_type' => $user['user_type'],
+        'email'     => $email,
         'started'   => time(),
-        'attempts'  => 0,
     ];
+
+    [$ok, $error] = tfaSendCode('login', (int) $user['id'], $email, $user['full_name']);
+    if (!$ok) {
+        unset($_SESSION['tfa_pending']);
+        $_SESSION['login_error'] = $error;
+        header('Location: /auth/login.php');
+        exit();
+    }
     header('Location: /auth/two_factor.php');
     exit();
 }
