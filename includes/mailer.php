@@ -80,6 +80,7 @@ function mailSendViaScript($to, $subject, $textBody, $htmlBody) {
     ]);
     $response = curl_exec($ch);
     $curlError = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
     if ($response === false) {
@@ -87,8 +88,16 @@ function mailSendViaScript($to, $subject, $textBody, $htmlBody) {
     }
     $result = json_decode($response, true);
     if (empty($result['ok'])) {
-        error_log('Gmail relay failed: ' . substr($response, 0, 500));
-        return [false, 'Gmail relay error: ' . ($result['error'] ?? 'unexpected response')];
+        error_log('Gmail relay failed: HTTP ' . $httpCode . ' ' . substr($response, 0, 500));
+        if (isset($result['error'])) {
+            return [false, 'Gmail relay error: ' . $result['error']];
+        }
+        // Google returned a web page instead of JSON (sign-in page, script error, ...)
+        $title = preg_match('/<title>(.*?)<\/title>/is', $response, $m) ? trim(html_entity_decode(strip_tags($m[1]))) : '';
+        $hint = stripos($response, 'accounts.google.com') !== false || stripos($title, 'sign in') !== false
+            ? 'set "Who has access" to Anyone and redeploy'
+            : ($title !== '' ? $title : 'unexpected response');
+        return [false, 'Gmail relay error (HTTP ' . $httpCode . '): ' . $hint];
     }
     return [true, ''];
 }
