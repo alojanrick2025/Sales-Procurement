@@ -227,6 +227,14 @@ require_once __DIR__ . '/../includes/header.php';
     }
 
     /* Print specifications */
+    /* Phones: tighter sheet, and let the items table scroll sideways instead of being cut off */
+    @media screen and (max-width: 768px) {
+        .printable-order-sheet {
+            padding: 16px;
+            overflow-x: auto;
+        }
+    }
+
     @media print {
         @page {
             size: portrait;

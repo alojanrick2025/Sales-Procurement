@@ -48,7 +48,7 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
         }
     }
     $initials = getUserInitials($user['full_name']);
-    return '<div class="header-avatar-initials">' . htmlspecialchars($initials) . '</div>';
+    return '<span class="header-avatar-initials">' . htmlspecialchars($initials) . '</span>';
 }
 ?>
 <!DOCTYPE html>
@@ -559,6 +559,66 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
         .dropdown-item i {
             font-size: 1.15rem;
         }
+
+        /* ==========================================================================
+           SMALL SCREENS
+           ========================================================================== */
+        /* Let the long title shrink (with "...") instead of pushing the user menu off-screen */
+        .top-navbar > div:first-child,
+        .top-navbar .navbar-brand {
+            min-width: 0;
+        }
+        .top-navbar .navbar-brand span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* The profile trigger is a <button> so it works with the keyboard; keep it looking plain */
+        .user-profile-dropdown {
+            background: none;
+            border: 0;
+            padding: 0;
+            color: inherit;
+            text-align: left;
+        }
+        /* Line-item tables scroll sideways on phones, so keep their inputs usable */
+        #itemsTable .form-control,
+        #itemsTable .form-select {
+            min-width: 80px;
+        }
+        #itemsTable .item-catalog-select {
+            min-width: 200px;
+        }
+        @media (max-width: 768px) {
+            .top-navbar {
+                padding: 10px 12px;
+                gap: 8px;
+            }
+            .top-navbar .navbar-brand {
+                font-size: 1rem;
+            }
+            .top-navbar .hamburger-btn.me-3 {
+                margin-right: 0.5rem !important;
+            }
+            .main-content.p-4 {
+                padding: 1rem 0.75rem !important;
+            }
+            .main-content h2 {
+                font-size: 1.35rem;
+            }
+            /* Page title + action buttons: stack instead of overlapping */
+            .main-content > .d-flex.justify-content-between,
+            .main-content .d-flex.gap-2 {
+                flex-wrap: wrap;
+                gap: 0.75rem;
+            }
+        }
+        @media (max-width: 576px) {
+            .user-info,
+            .user-profile-dropdown > .ph-caret-down {
+                display: none;
+            }
+        }
     </style>
     <script>
         (function() {
@@ -589,17 +649,17 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
         
         <?php if ($currentUser): ?>
         <div class="dropdown">
-            <div class="user-profile-dropdown" data-bs-toggle="dropdown" aria-expanded="false">
+            <button type="button" class="user-profile-dropdown" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Account menu">
                 <?php echo getHeaderAvatarHtml($currentUser, $sysLogo); ?>
-                <div class="user-info">
-                    <span class="user-name"><?php 
+                <span class="user-info">
+                    <span class="user-name"><?php
                         $displayName = !empty($systemInfoGlobal['user_name']) ? $systemInfoGlobal['user_name'] : $currentUser['full_name'];
-                        echo htmlspecialchars($displayName); 
+                        echo htmlspecialchars($displayName);
                     ?></span>
                     <span class="user-role"><?php echo getUserTypeDisplay($currentUser['user_type']); ?></span>
-                </div>
+                </span>
                 <i class="ph-bold ph-caret-down text-white-50 ms-1"></i>
-            </div>
+            </button>
             <ul class="dropdown-menu dropdown-menu-end">
                 <li>
                     <a class="dropdown-item" href="/admin/my_profile.php">
