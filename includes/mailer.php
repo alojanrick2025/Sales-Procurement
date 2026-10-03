@@ -73,7 +73,8 @@ function mailSendViaScript($to, $subject, $textBody, $htmlBody) {
             'html'     => $htmlBody,
             'fromName' => mailFromName(),
         ]),
-        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        // No JSON Content-Type header: curl re-sends custom headers on the redirect
+        // to googleusercontent.com, which then answers 404. The script reads the raw body anyway.
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true, // Apps Script answers via a redirect
         CURLOPT_TIMEOUT        => 20,
