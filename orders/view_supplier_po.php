@@ -21,6 +21,12 @@ if (!$po) {
 $success = '';
 $error = '';
 
+// Message from the edit page after saving changes
+if (!empty($_SESSION['po_flash'])) {
+    $success = $_SESSION['po_flash'];
+    unset($_SESSION['po_flash']);
+}
+
 // Handle status update with CSRF validation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     if (!validateCsrfToken()) {
@@ -76,6 +82,9 @@ require_once __DIR__ . '/../includes/header.php';
         <span class="text-muted small">Issued on <?php echo date('F d, Y', strtotime($po['order_date'])); ?></span>
     </div>
     <div class="d-flex gap-2">
+        <a href="/orders/add_supplier_po.php?id=<?php echo $id; ?>" class="btn btn-outline-primary">
+            <i class="ph-bold ph-pencil-simple"></i> Edit
+        </a>
         <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
             <i class="ph-bold ph-printer"></i> Print PO
         </button>

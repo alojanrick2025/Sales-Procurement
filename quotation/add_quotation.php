@@ -253,7 +253,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <div class="d-flex flex-column gap-1">
                                     <div class="d-flex align-items-center gap-1">
                                         <span class="text-nowrap">Mark-up %</span>
-                                        <input type="number" step="5" min="0" max="999" id="globalMarkupInput"
+                                        <input type="number" step="any" min="0" max="999" id="globalMarkupInput"
                                             class="form-control form-control-sm text-center" style="width:58px;"
                                             value="0" placeholder="%">
                                     </div>
@@ -310,7 +310,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     style="cursor: not-allowed;" required>
                             </td>
                             <td>
-                                <input type="number" step="5" min="0" max="999" name="item_markup[]"
+                                <input type="number" step="any" min="0" max="999" name="item_markup[]"
                                     class="form-control item-markup-input text-center" value="0" placeholder="%">
                             </td>
                             <td>

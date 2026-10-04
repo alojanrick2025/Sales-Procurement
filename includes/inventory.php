@@ -112,20 +112,47 @@ function orderStockConfig($kind) {
  * or ['ok' => false, 'error' => string].
  */
 function syncOrderStock($conn, $kind, $orderId) {
+    $order = lockOrderForStock($conn, $kind, $orderId);
+    if (!$order) {
+        return ['ok' => false, 'error' => 'Order not found.'];
+    }
+    $shouldApply = $order['status'] === 'completed';
+    if ($shouldApply === (bool) $order['stock_applied']) {
+        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => []];
+    }
+    return moveOrderStock($conn, $kind, $order, $shouldApply);
+}
+
+/**
+ * Take an order's items back out of stock if they are currently counted, whatever
+ * its status (used before editing an order's items; syncOrderStock() re-applies them).
+ * Must run inside the caller's transaction.
+ */
+function reverseOrderStock($conn, $kind, $orderId) {
+    $order = lockOrderForStock($conn, $kind, $orderId);
+    if (!$order) {
+        return ['ok' => false, 'error' => 'Order not found.'];
+    }
+    if (!$order['stock_applied']) {
+        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => []];
+    }
+    return moveOrderStock($conn, $kind, $order, false);
+}
+
+function lockOrderForStock($conn, $kind, $orderId) {
     $cfg = orderStockConfig($kind);
     $stmt = $conn->prepare("SELECT id, po_number, status, stock_applied FROM `{$cfg['table']}` WHERE id = ? FOR UPDATE");
     $stmt->bind_param("i", $orderId);
     $stmt->execute();
     $order = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    if (!$order) {
-        return ['ok' => false, 'error' => 'Order not found.'];
-    }
+    return $order;
+}
 
-    $shouldApply = $order['status'] === 'completed';
-    if ($shouldApply === (bool) $order['stock_applied']) {
-        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => []];
-    }
+// Add ($apply = true) or remove an order's items from stock and set stock_applied
+function moveOrderStock($conn, $kind, $order, $shouldApply) {
+    $cfg = orderStockConfig($kind);
+    $orderId = (int) $order['id'];
 
     // Quantities per catalog item (an item may appear on several lines)
     $markdown = $kind === 'supplier' ? 'markdown_rate' : '0 AS markdown_rate';
@@ -163,15 +190,25 @@ function syncOrderStock($conn, $kind, $orderId) {
         }
     }
     if ($short) {
-        $what = $shouldApply && $kind === 'customer' ? 'complete this order' : 'reverse this order';
+        if ($shouldApply) {
+            $what = 'complete this order';
+        } elseif ($order['status'] === 'completed') {
+            $what = 'change this order';
+        } else {
+            $what = 'reverse this order';
+        }
         return ['ok' => false, 'error' => "Not enough stock to $what: " . implode('; ', $short) . '. Receive or adjust the stock first.'];
     }
 
     $reference = [$kind . '_order', (int) $order['id'], $order['po_number']];
     $type = $shouldApply ? $cfg['type'] : 'reversal';
-    $note = $shouldApply
-        ? $cfg['label'] . ' ' . $order['po_number'] . ' completed'
-        : $cfg['label'] . ' ' . $order['po_number'] . ' changed from Completed to ' . ucfirst($order['status']);
+    if ($shouldApply) {
+        $note = $cfg['label'] . ' ' . $order['po_number'] . ' completed';
+    } elseif ($order['status'] === 'completed') {
+        $note = $cfg['label'] . ' ' . $order['po_number'] . ' edited (previous items reversed)';
+    } else {
+        $note = $cfg['label'] . ' ' . $order['po_number'] . ' changed from Completed to ' . ucfirst($order['status']);
+    }
     foreach ($changes as $id => $change) {
         if (abs($change['delta']) >= 0.005) {
             moveStock($conn, $id, $change['delta'], $type, $note, $reference);
@@ -210,4 +247,18 @@ function orderStockMessage($kind, $result) {
         $message .= ' Not linked to an inventory item, so not counted: ' . implode(', ', $result['skipped']) . '.';
     }
     return $message;
+}
+
+// Summary for an edited order: its old items were reversed and/or its new items applied
+function orderEditStockMessage($kind, $reverseResult, $applyResult) {
+    $reversed = !empty($reverseResult['action']);
+    $applied = !empty($applyResult['action']);
+    if ($reversed && $applied) {
+        $message = ' Stock updated to match the changed items.';
+        if ($applyResult['skipped']) {
+            $message .= ' Not linked to an inventory item, so not counted: ' . implode(', ', $applyResult['skipped']) . '.';
+        }
+        return $message;
+    }
+    return $reversed ? orderStockMessage($kind, $reverseResult) : orderStockMessage($kind, $applyResult);
 }

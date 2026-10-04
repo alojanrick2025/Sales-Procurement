@@ -8,6 +8,28 @@ $conn = getDBConnection();
 $error = '';
 $success = '';
 
+// Edit mode (?id=): the same form, filled in with an existing order
+$editId = intval($_GET['id'] ?? 0);
+$editing = null;
+$editItems = [];
+if ($editId > 0) {
+    $stmt = $conn->prepare("SELECT * FROM supplier_orders WHERE id = ?");
+    $stmt->bind_param("i", $editId);
+    $stmt->execute();
+    $editing = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$editing) {
+        header('Location: /orders/supplier_po.php');
+        exit();
+    }
+    $stmt = $conn->prepare("SELECT * FROM supplier_order_items WHERE supplier_order_id = ? ORDER BY id ASC");
+    $stmt->bind_param("i", $editId);
+    $stmt->execute();
+    $editItems = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    $pageTitle = 'Edit Supplier Purchase Order';
+}
+
 // Generate next PO number
 $poQuery = $conn->query("SELECT MAX(id) as max_id FROM supplier_orders");
 $nextId = ($poQuery->fetch_assoc()['max_id'] ?? 0) + 1;
@@ -23,8 +45,10 @@ while ($s = $suppliersRes->fetch_assoc())
 // Suppliers are paid the cost price (selling price until a cost has been recorded)
 $catalogRes = $conn->query("SELECT id, name, description, unit, IF(cost_price > 0, cost_price, price) AS price FROM item_list WHERE status = 1 ORDER BY name ASC");
 $catalog = [];
-while ($row = $catalogRes->fetch_assoc())
+while ($row = $catalogRes->fetch_assoc()) {
+    $row['name'] = html_entity_decode(str_ireplace('&quot;', '"', $row['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     $catalog[] = $row;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $po_number = trim($_POST['po_number'] ?? $nextPoNum);
@@ -76,12 +100,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $conn->begin_transaction();
         try {
-            $stmt = $conn->prepare("INSERT INTO supplier_orders (po_number, supplier_id, supplier_name, order_date, total_amount, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sissdss", $po_number, $supplier_id, $supplier_name, $order_date, $grand_total, $status, $notes);
-            if (!$stmt->execute())
-                throw new Exception("Error saving PO: " . $stmt->error);
-            $newId = $conn->insert_id;
-            $stmt->close();
+            $reverseResult = null;
+            if ($editing) {
+                // Take the order's current items out of stock first; the edited items are applied below
+                $reverseResult = reverseOrderStock($conn, 'supplier', $editId);
+                if (!$reverseResult['ok']) {
+                    throw new Exception(htmlspecialchars($reverseResult['error']));
+                }
+                $stmt = $conn->prepare("UPDATE supplier_orders SET po_number = ?, supplier_id = ?, supplier_name = ?, order_date = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?");
+                $stmt->bind_param("sissdssi", $po_number, $supplier_id, $supplier_name, $order_date, $grand_total, $status, $notes, $editId);
+                $stmt->execute();
+                $stmt->close();
+                $stmt = $conn->prepare("DELETE FROM supplier_order_items WHERE supplier_order_id = ?");
+                $stmt->bind_param("i", $editId);
+                $stmt->execute();
+                $stmt->close();
+                $newId = $editId;
+            } else {
+                $stmt = $conn->prepare("INSERT INTO supplier_orders (po_number, supplier_id, supplier_name, order_date, total_amount, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sissdss", $po_number, $supplier_id, $supplier_name, $order_date, $grand_total, $status, $notes);
+                if (!$stmt->execute())
+                    throw new Exception("Error saving PO: " . $stmt->error);
+                $newId = $conn->insert_id;
+                $stmt->close();
+            }
 
             $iStmt = $conn->prepare("INSERT INTO supplier_order_items (supplier_order_id, item_id, item_name, description, unit, quantity, unit_price, markdown_rate, total_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($validItems as $item) {
@@ -98,6 +140,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $conn->commit();
+            if ($editing) {
+                $_SESSION['po_flash'] = 'Purchase order ' . $po_number . ' updated.' . orderEditStockMessage('supplier', $reverseResult, $stockResult);
+                header('Location: /orders/view_supplier_po.php?id=' . $editId);
+                exit();
+            }
             $success = "Supplier Purchase Order <strong>" . htmlspecialchars($po_number) . "</strong> created successfully!" . htmlspecialchars(orderStockMessage('supplier', $stockResult));
         } catch (Exception $e) {
             $conn->rollback();
@@ -106,14 +153,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Values shown in the form: the order being edited, or what was just submitted if saving failed
+$form = [
+    'po_number' => $nextPoNum,
+    'order_date' => date('Y-m-d'),
+    'partner_id' => null,
+    'partner_name' => '',
+    'status' => 'pending',
+    'notes' => '',
+];
+$formItems = [];
+if ($editing) {
+    $form = [
+        'po_number' => $editing['po_number'],
+        'order_date' => $editing['order_date'],
+        'partner_id' => $editing['supplier_id'],
+        'partner_name' => $editing['supplier_name'],
+        'status' => $editing['status'],
+        'notes' => $editing['notes'] ?? '',
+    ];
+    foreach ($editItems as $it) {
+        $formItems[] = ['item_id' => $it['item_id'], 'item_name' => $it['item_name'], 'description' => $it['description'], 'unit' => $it['unit'],
+            'quantity' => (float) $it['quantity'], 'unit_price' => (float) $it['unit_price'], 'markdown' => (float) ($it['markdown_rate'] ?? 0)];
+    }
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error) {
+    $form = [
+        'po_number' => $po_number,
+        'order_date' => $order_date,
+        'partner_id' => $supplier_id,
+        'partner_name' => $supplier_name,
+        'status' => $status,
+        'notes' => $notes,
+    ];
+    $formItems = [];
+    foreach ($validItems as $it) {
+        $formItems[] = ['item_id' => $it['item_id'], 'item_name' => $it['item_name'], 'description' => $it['description'], 'unit' => $it['unit'],
+            'quantity' => $it['quantity'], 'unit_price' => $it['unit_price'], 'markdown' => $it['markdown'] ?? 0];
+    }
+}
+$partnerListed = false;
+foreach ($suppliers as $partner) {
+    $partnerListed = $partnerListed || (int) $partner['id'] === (int) $form['partner_id'];
+}
+
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="ph-bold ph-plus-circle"></i> Create Supplier Purchase Order</h2>
-    <a href="/orders/supplier_po.php" class="btn btn-secondary">
-        <i class="ph-bold ph-arrow-left"></i> Back to PO List
-    </a>
+    <?php if ($editing): ?>
+        <h2><i class="ph-bold ph-pencil-simple"></i> Edit Supplier Purchase Order</h2>
+        <a href="/orders/view_supplier_po.php?id=<?php echo $editId; ?>" class="btn btn-secondary">
+            <i class="ph-bold ph-arrow-left"></i> Back to Order
+        </a>
+    <?php else: ?>
+        <h2><i class="ph-bold ph-plus-circle"></i> Create Supplier Purchase Order</h2>
+        <a href="/orders/supplier_po.php" class="btn btn-secondary">
+            <i class="ph-bold ph-arrow-left"></i> Back to PO List
+        </a>
+    <?php endif; ?>
 </div>
 
 <?php if ($error): ?>
@@ -141,12 +239,12 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="col-md-6 mb-3">
                     <label class="form-label">PO Number <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" name="po_number" required
-                        value="<?php echo htmlspecialchars($nextPoNum); ?>">
+                        value="<?php echo htmlspecialchars($form['po_number']); ?>">
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Order Date <span class="text-danger">*</span></label>
                     <input type="date" class="form-control" name="order_date" required
-                        value="<?php echo date('Y-m-d'); ?>">
+                        value="<?php echo htmlspecialchars($form['order_date']); ?>">
                 </div>
             </div>
             <div class="row">
@@ -154,14 +252,18 @@ require_once __DIR__ . '/../includes/header.php';
                     <label class="form-label">Supplier <span class="text-danger">*</span></label>
                     <select class="form-select" name="supplier_id" id="supplierSelect" required>
                         <option value="">-- Select Supplier --</option>
+                        <?php if (!$partnerListed && $form['partner_name'] !== ''): ?>
+                            <!-- Name saved on the order but not (or no longer) in Business Partners -->
+                            <option value="0" selected data-name="<?php echo htmlspecialchars($form['partner_name']); ?>"><?php echo htmlspecialchars($form['partner_name']); ?></option>
+                        <?php endif; ?>
                         <?php foreach ($suppliers as $sp): ?>
-                            <option value="<?php echo $sp['id']; ?>"
+                            <option value="<?php echo $sp['id']; ?>" <?php echo (int) $sp['id'] === (int) $form['partner_id'] ? 'selected' : ''; ?>
                                 data-name="<?php echo htmlspecialchars($sp['name']); ?>">
                                 <?php echo htmlspecialchars($sp['name']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
-                    <input type="hidden" name="supplier_name" id="supplierNameInput" value="">
+                    <input type="hidden" name="supplier_name" id="supplierNameInput" value="<?php echo htmlspecialchars($form['partner_name']); ?>">
                     <?php if (empty($suppliers)): ?>
                         <div class="form-text text-warning"><i class="ph-bold ph-warning"></i> No suppliers found in
                             Business Partners. <a href="/clients/add_client.php">Add a supplier partner</a> first.</div>
@@ -170,11 +272,9 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Status</label>
                     <select class="form-select" name="status">
-                        <option value="pending" selected>Pending</option>
-                        <option value="approved">Approved</option>
-                        <option value="processing">Processing</option>
-                        <option value="completed">Completed</option>
-                        <option value="cancelled">Cancelled</option>
+                        <?php foreach (['pending', 'approved', 'processing', 'completed', 'cancelled'] as $option): ?>
+                            <option value="<?php echo $option; ?>" <?php echo $form['status'] === $option ? 'selected' : ''; ?>><?php echo ucfirst($option); ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
             </div>
@@ -202,7 +302,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <div class="d-flex flex-column gap-1">
                                     <div class="d-flex align-items-center gap-1">
                                         <span class="text-nowrap">Markdown %</span>
-                                        <input type="number" step="5" min="0" max="999" id="globalMarkdownInput"
+                                        <input type="number" step="any" min="0" max="999" id="globalMarkdownInput"
                                             class="form-control form-control-sm text-center" style="width:58px;"
                                             value="0" placeholder="%">
                                     </div>
@@ -251,7 +351,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     name="item_qty[]" value="1" min="0.01" step="0.01"></td>
                             <td><input type="number" class="form-control form-control-sm item-price-input"
                                     name="item_price[]" value="0.00" min="0" step="0.01"></td>
-                            <td><input type="number" step="5" min="0" max="999" name="item_markdown[]"
+                            <td><input type="number" step="any" min="0" max="999" name="item_markdown[]"
                                     class="form-control form-control-sm item-markdown-input text-center" value="0" placeholder="%"></td>
                             <td><input type="text" class="form-control form-control-sm item-total-display bg-light"
                                     readonly value="₱0.00"></td>
@@ -288,12 +388,12 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="card-body p-4">
             <label class="form-label fw-bold">Notes / Procurement Specifications</label>
             <textarea class="form-control" name="notes" rows="3"
-                placeholder="Enter procurement items, specifications, or supplier instructions..."></textarea>
+                placeholder="Enter procurement items, specifications, or supplier instructions..."><?php echo htmlspecialchars($form['notes']); ?></textarea>
         </div>
         <div class="card-footer bg-white d-flex justify-content-end gap-2 p-3">
             <a href="/orders/supplier_po.php" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary btn-lg">
-                <i class="ph-bold ph-floppy-disk"></i> Create Supplier PO
+                <i class="ph-bold ph-floppy-disk"></i> <?php echo $editing ? 'Save Changes' : 'Create Supplier PO'; ?>
             </button>
         </div>
     </div>
@@ -324,8 +424,10 @@ require_once __DIR__ . '/../includes/header.php';
     }
 
     function getRowTemplate() {
+        // Escape names: an unescaped quote (e.g. 5/8" X 8") cut the item name short
+        const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
         const options = catalogData.map(c =>
-            `<option value="${c.id}" data-name="${c.name}" data-desc="${c.description || ''}" data-unit="${c.unit || ''}" data-price="${c.price}">${c.name}</option>`
+            `<option value="${esc(c.id)}" data-name="${esc(c.name)}" data-desc="${esc(c.description)}" data-unit="${esc(c.unit)}" data-price="${esc(c.price)}">${esc(c.name)}</option>`
         ).join('');
         return `<tr class="item-row">
         <td>
@@ -339,7 +441,7 @@ require_once __DIR__ . '/../includes/header.php';
         <td><input type="text" class="form-control form-control-sm item-unit-input" name="item_unit[]" placeholder="PCS"></td>
         <td><input type="number" class="form-control form-control-sm item-qty-input" name="item_qty[]" value="1" min="0.01" step="0.01"></td>
         <td><input type="number" class="form-control form-control-sm item-price-input" name="item_price[]" value="0.00" min="0" step="0.01"></td>
-        <td><input type="number" step="5" min="0" max="999" name="item_markdown[]" class="form-control form-control-sm item-markdown-input text-center" value="0" placeholder="%"></td>
+        <td><input type="number" step="any" min="0" max="999" name="item_markdown[]" class="form-control form-control-sm item-markdown-input text-center" value="0" placeholder="%"></td>
         <td><input type="text" class="form-control form-control-sm item-total-display bg-light" readonly value="₱0.00"></td>
         <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger remove-row-btn"><i class="ph-bold ph-trash"></i></button></td>
     </tr>`;
@@ -406,6 +508,45 @@ require_once __DIR__ . '/../includes/header.php';
         bindRowEvents(newRow);
         calculateTotals();
     });
+
+    // Editing an order, or saving failed: rebuild the item rows from the saved values
+    const existingItems = <?php echo json_encode($formItems, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    if (existingItems.length) {
+        const tbody = document.getElementById('itemsBody');
+        tbody.innerHTML = '';
+        existingItems.forEach(function (item) {
+            const temp = document.createElement('tbody');
+            temp.innerHTML = getRowTemplate();
+            const row = temp.querySelector('tr');
+            const select = row.querySelector('.item-catalog-select');
+            if (item.item_id && !Array.from(select.options).some(o => o.value === String(item.item_id))) {
+                // Item no longer active in Inventory: keep it selectable
+                const opt = new Option(item.item_name, item.item_id);
+                opt.dataset.name = item.item_name;
+                opt.dataset.desc = item.description || '';
+                opt.dataset.unit = item.unit || '';
+                opt.dataset.price = item.unit_price;
+                select.add(opt);
+            }
+            select.value = item.item_id ? String(item.item_id) : '';
+            if (!item.item_id) {
+                const note = document.createElement('div');
+                note.className = 'small text-muted mt-1';
+                note.textContent = item.item_name + ' (not an inventory item)';
+                select.parentNode.insertBefore(note, select.nextSibling);
+            }
+            row.querySelector('.item-id-input').value = item.item_id || '';
+            row.querySelector('.item-name-input').value = item.item_name;
+            row.querySelector('.item-desc-input').value = item.description || '';
+            row.querySelector('.item-unit-input').value = item.unit || '';
+            row.querySelector('.item-qty-input').value = item.quantity;
+            row.querySelector('.item-price-input').value = item.unit_price;
+            row.querySelector('.item-markdown-input').value = item.markdown;
+            tbody.appendChild(row);
+            bindRowEvents(row);
+        });
+        calculateTotals();
+    }
 </script>
 
 <?php
