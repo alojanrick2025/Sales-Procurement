@@ -205,7 +205,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             $conn->commit();
-            $success = $shouldUpdatePassword ? 'System information and administrator password updated successfully!' : 'System information updated successfully!';
+            forgetSystemInfoCache();
+            $success =$shouldUpdatePassword ? 'System information and administrator password updated successfully!' : 'System information updated successfully!';
             
             // Refresh system info data
             $result = $conn->query("SELECT meta_field, meta_value FROM system_info");

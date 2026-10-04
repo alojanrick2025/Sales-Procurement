@@ -1,0 +1,5 @@
+# Pages link these files through assetUrl() (config.php), which adds ?v=<modification time>.
+# A changed file gets a new URL, so browsers may keep each version for a year.
+<IfModule mod_headers.c>
+    Header set Cache-Control "public, max-age=31536000, immutable"
+</IfModule>

@@ -55,6 +55,7 @@ function tfaSetEnabled($conn, $enabled) {
     $stmt->bind_param("ss", $value, $field);
     $stmt->execute();
     $stmt->close();
+    forgetSystemInfoCache();
 }
 
 function tfaGetUserEmail($conn, $userId) {

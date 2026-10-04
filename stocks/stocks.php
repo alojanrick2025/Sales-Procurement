@@ -59,18 +59,18 @@ $stockSort = $_GET['stock_sort'] ?? '';
 
 $allowedUnits = ['PCS', 'SET', 'ASS', 'FEET', 'MTR'];
 
-// KPI statistics
-$totalItemsQuery = $conn->query("SELECT COUNT(*) as total FROM item_list");
-$totalItems = $totalItemsQuery->fetch_assoc()['total'] ?? 0;
-
-$inStockQuery = $conn->query("SELECT COUNT(*) as total FROM item_list WHERE stocks > 10");
-$inStockCount = $inStockQuery->fetch_assoc()['total'] ?? 0;
-
-$lowStockQuery = $conn->query("SELECT COUNT(*) as total FROM item_list WHERE stocks > 0 AND stocks <= 10");
-$lowStockCount = $lowStockQuery->fetch_assoc()['total'] ?? 0;
-
-$outOfStockQuery = $conn->query("SELECT COUNT(*) as total FROM item_list WHERE stocks <= 0");
-$outOfStockCount = $outOfStockQuery->fetch_assoc()['total'] ?? 0;
+// KPI statistics (one query)
+$stockStats = $conn->query("
+    SELECT COUNT(*) as total,
+           COUNT(CASE WHEN stocks > 10 THEN 1 END) as in_stock,
+           COUNT(CASE WHEN stocks > 0 AND stocks <= 10 THEN 1 END) as low_stock,
+           COUNT(CASE WHEN stocks <= 0 THEN 1 END) as out_of_stock
+    FROM item_list
+")->fetch_assoc();
+$totalItems = $stockStats['total'] ?? 0;
+$inStockCount = $stockStats['in_stock'] ?? 0;
+$lowStockCount = $stockStats['low_stock'] ?? 0;
+$outOfStockCount = $stockStats['out_of_stock'] ?? 0;
 
 // Build query with chosen sort
 if ($stockSort === 'asc') {
@@ -480,8 +480,7 @@ require_once __DIR__ . '/../includes/header.php';
         }
 
         if (stockSearchInput) {
-            stockSearchInput.addEventListener('input', filterStockItems);
-            stockSearchInput.addEventListener('keyup', filterStockItems);
+            stockSearchInput.addEventListener('input', debounce(filterStockItems, 150));
             stockSearchInput.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();

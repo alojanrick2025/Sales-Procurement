@@ -276,8 +276,7 @@ if (isset($_SESSION['success_message'])) {
         }
 
         if (searchInput) {
-            searchInput.addEventListener('input', filterItems);
-            searchInput.addEventListener('keyup', filterItems);
+            searchInput.addEventListener('input', debounce(filterItems, 150));
             searchInput.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();

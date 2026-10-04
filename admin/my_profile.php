@@ -1,5 +1,6 @@
 <?php
 $pageTitle = 'My Profile';
+$useBootstrapIcons = true; // this page uses "bi-" icons
 require_once __DIR__ . '/../config.php';
 requireLogin();
 require_once __DIR__ . '/../includes/header.php';

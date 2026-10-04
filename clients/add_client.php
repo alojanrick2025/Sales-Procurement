@@ -1,5 +1,6 @@
 <?php
 $pageTitle = 'Add Business Partner';
+$useBootstrapIcons = true; // this page uses "bi-" icons
 require_once __DIR__ . '/../config.php';
 requireLogin();
 require_once __DIR__ . '/../includes/header.php';
@@ -155,7 +156,7 @@ $conn->close();
 
             <!-- Map for coordinate selection -->
             <div class="mb-4">
-                <div id="map" style="height: 400px; width: 100%; border-radius: 10px; border: 1px solid #dee2e6;"></div>
+                <div id="map" class="map-skeleton" style="height: 400px; width: 100%; border-radius: 10px; border: 1px solid #dee2e6;"></div>
                 <small class="text-muted">Click on the map to set coordinates</small>
             </div>
 

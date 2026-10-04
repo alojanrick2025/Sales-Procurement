@@ -4,44 +4,42 @@ require_once __DIR__ . '/../includes/header.php';
 
 $conn = getDBConnection();
 
+// Dashboard figures in one query (one round trip to the database, each table read once)
+$orderStats = "
+        COUNT(*) AS total,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed,
+        COUNT(CASE WHEN status = 'cancelled' THEN 1 END) AS cancelled,
+        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total_amount END), 0) AS value";
+$stats = $conn->query("
+    SELECT q.total AS quotations, q.pending AS pending_quotations,
+           c.total AS customer_pos, c.completed AS customer_completed, c.cancelled AS customer_cancelled, c.value AS sales_value,
+           s.total AS supplier_pos, s.completed AS supplier_completed, s.cancelled AS supplier_cancelled, s.value AS procurement_value
+    FROM (SELECT COUNT(*) AS total, COUNT(CASE WHEN status IN ('draft', 'sent', 'pending') THEN 1 END) AS pending FROM quotations) q
+    CROSS JOIN (SELECT $orderStats FROM customer_orders) c
+    CROSS JOIN (SELECT $orderStats FROM supplier_orders) s
+")->fetch_assoc();
+
 // 1. Total Quotations
-$totQuoteRes = $conn->query("SELECT COUNT(*) as total FROM quotations");
-$totalQuotations = intval($totQuoteRes->fetch_assoc()['total'] ?? 0);
+$totalQuotations = intval($stats['quotations'] ?? 0);
 
 // 2. Pending Quotations
-$pendingQuoteRes = $conn->query("SELECT COUNT(*) as pending FROM quotations WHERE status IN ('draft', 'sent', 'pending')");
-$pendingQuotations = intval($pendingQuoteRes->fetch_assoc()['pending'] ?? 0);
+$pendingQuotations = intval($stats['pending_quotations'] ?? 0);
 
 // 3. Customer POs
-$custPoRes = $conn->query("SELECT COUNT(*) as total FROM customer_orders");
-$totalCustomerPOs = intval($custPoRes->fetch_assoc()['total'] ?? 0);
+$totalCustomerPOs = intval($stats['customer_pos'] ?? 0);
 
 // 4. Supplier POs
-$suppPoRes = $conn->query("SELECT COUNT(*) as total FROM supplier_orders");
-$totalSupplierPOs = intval($suppPoRes->fetch_assoc()['total'] ?? 0);
+$totalSupplierPOs = intval($stats['supplier_pos'] ?? 0);
 
 // 5. Completed Orders (combined customer and supplier orders)
-$compOrdersRes = $conn->query("
-    SELECT 
-        (SELECT COUNT(*) FROM customer_orders WHERE status = 'completed') +
-        (SELECT COUNT(*) FROM supplier_orders WHERE status = 'completed') as total
-");
-$completedOrders = intval($compOrdersRes->fetch_assoc()['total'] ?? 0);
+$completedOrders = intval($stats['customer_completed'] ?? 0) + intval($stats['supplier_completed'] ?? 0);
 
 // 6. Cancelled Orders (combined customer and supplier orders)
-$cancOrdersRes = $conn->query("
-    SELECT 
-        (SELECT COUNT(*) FROM customer_orders WHERE status = 'cancelled') +
-        (SELECT COUNT(*) FROM supplier_orders WHERE status = 'cancelled') as total
-");
-$cancelledOrders = intval($cancOrdersRes->fetch_assoc()['total'] ?? 0);
+$cancelledOrders = intval($stats['customer_cancelled'] ?? 0) + intval($stats['supplier_cancelled'] ?? 0);
 
 // Total Sales and Procurement Values for activity widgets
-$salesValRes = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM customer_orders WHERE status != 'cancelled'");
-$totalSalesValue = floatval($salesValRes->fetch_assoc()['total'] ?? 0);
-
-$procValRes = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM supplier_orders WHERE status != 'cancelled'");
-$totalProcValue = floatval($procValRes->fetch_assoc()['total'] ?? 0);
+$totalSalesValue = floatval($stats['sales_value'] ?? 0);
+$totalProcValue = floatval($stats['procurement_value'] ?? 0);
 
 // Recent Transactions Query (combined quotations, customer POs, and supplier POs)
 $recentTransSql = "

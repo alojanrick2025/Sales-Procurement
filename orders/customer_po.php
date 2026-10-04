@@ -181,7 +181,7 @@ require_once __DIR__ . '/../includes/footer.php';
             }
         }
 
-        searchInput.addEventListener('input', filterTable);
+        searchInput.addEventListener('input', debounce(filterTable, 150));
         statusSelect.addEventListener('change', filterTable);
 
         // Run once on load to apply any server-side pre-filled values

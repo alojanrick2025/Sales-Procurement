@@ -1,5 +1,6 @@
 <?php
 $pageTitle = 'Business Partners';
+$useBootstrapIcons = true; // this page uses "bi-" icons
 require_once __DIR__ . '/../config.php';
 requireLogin();
 require_once __DIR__ . '/../includes/header.php';
@@ -443,7 +444,7 @@ function renderPartnerTable($list, $showTypeBadge = true)
         </div>
     </div>
     <div class="card-body p-0 position-relative">
-        <div id="philippinesPartnerMap" style="height: 520px; width: 100%; z-index: 1;"></div>
+        <div id="philippinesPartnerMap" class="map-skeleton" style="height: 520px; width: 100%; z-index: 1;"></div>
     </div>
     <div class="card-footer py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2 small text-muted"
         style="background: #F7F9F8; border-top: 1px solid #E3E8E5;">
@@ -461,7 +462,7 @@ function renderPartnerTable($list, $showTypeBadge = true)
     </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         // 1. Tab Synchronization

@@ -12,28 +12,27 @@ $error = $_GET['error'] ?? '';
 $search = $_GET['search'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
 
-// KPI statistics
-$totalQry = $conn->query("SELECT COUNT(*) as total, COALESCE(SUM(grand_total), 0) as total_val FROM quotations");
-$totalData = $totalQry->fetch_assoc();
+// KPI statistics (one query)
+$totalData = $conn->query("
+    SELECT COUNT(*) as total, COALESCE(SUM(grand_total), 0) as total_val,
+           COUNT(CASE WHEN status = 'draft' THEN 1 END) as draft,
+           COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent,
+           COUNT(CASE WHEN status = 'accepted' THEN 1 END) as accepted
+    FROM quotations
+")->fetch_assoc();
 $totalQuotations = $totalData['total'] ?? 0;
 $totalQuotedValue = $totalData['total_val'] ?? 0;
-
-$draftQry = $conn->query("SELECT COUNT(*) as total FROM quotations WHERE status = 'draft'");
-$draftCount = $draftQry->fetch_assoc()['total'] ?? 0;
-
-$sentQry = $conn->query("SELECT COUNT(*) as total FROM quotations WHERE status = 'sent'");
-$sentCount = $sentQry->fetch_assoc()['total'] ?? 0;
-
-$acceptedQry = $conn->query("SELECT COUNT(*) as total FROM quotations WHERE status = 'accepted'");
-$acceptedCount = $acceptedQry->fetch_assoc()['total'] ?? 0;
+$draftCount = $totalData['draft'] ?? 0;
+$sentCount = $totalData['sent'] ?? 0;
+$acceptedCount = $totalData['accepted'] ?? 0;
 
 // Query quotations
-$query = "SELECT * FROM quotations WHERE 1=1";
+$where = " WHERE 1=1";
 $params = [];
 $types = '';
 
 if (!empty($search)) {
-    $query .= " AND (quotation_number LIKE ? OR client_name LIKE ?)";
+    $where .= " AND (quotation_number LIKE ? OR client_name LIKE ?)";
     $searchParam = "%$search%";
     $params[] = $searchParam;
     $params[] = $searchParam;
@@ -41,17 +40,28 @@ if (!empty($search)) {
 }
 
 if (!empty($statusFilter)) {
-    $query .= " AND status = ?";
+    $where .= " AND status = ?";
     $params[] = $statusFilter;
     $types .= 's';
 }
 
-$query .= " ORDER BY created_at DESC";
+// Pagination
+require_once __DIR__ . '/../includes/pagination.php';
+$countStmt = $conn->prepare("SELECT COUNT(*) as total FROM quotations" . $where);
+if (!empty($params)) {
+    $countStmt->bind_param($types, ...$params);
+}
+$countStmt->execute();
+$pagination = paginate($countStmt->get_result()->fetch_assoc()['total']);
+$countStmt->close();
+
+$query = "SELECT * FROM quotations" . $where . " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+$params[] = $pagination['limit'];
+$params[] = $pagination['offset'];
+$types .= 'ii';
 
 $stmt = $conn->prepare($query);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
+$stmt->bind_param($types, ...$params);
 $stmt->execute();
 $result = $stmt->get_result();
 
@@ -264,6 +274,7 @@ require_once __DIR__ . '/../includes/header.php';
                 </tbody>
             </table>
         </div>
+        <?php echo paginationLinks($pagination); ?>
     </div>
 </div>
 

@@ -1,5 +1,6 @@
 <?php
 $pageTitle = 'List of System Users';
+$useBootstrapIcons = true; // this page uses "bi-" icons
 require_once __DIR__ . '/../config.php';
 requireAdminLogin();
 require_once __DIR__ . '/../includes/header.php';
@@ -62,7 +63,7 @@ $result = $stmt->get_result();
 // Function to get avatar HTML
 function getAvatarHtml($user) {
     if (!empty($user['avatar']) && file_exists($user['avatar'])) {
-        return '<img src="' . htmlspecialchars($user['avatar']) . '" alt="Avatar" class="rounded-circle" style="width: 40px; height: 40px; object-fit: cover;">';
+        return '<img src="' . htmlspecialchars($user['avatar']) . '" alt="Avatar" class="rounded-circle" width="40" height="40" loading="lazy" decoding="async" style="width: 40px; height: 40px; object-fit: cover;">';
     } else {
         $initials = getUserInitials($user['full_name']);
         return '<div class="user-avatar">' . htmlspecialchars($initials) . '</div>';

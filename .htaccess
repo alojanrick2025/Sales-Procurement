@@ -4,6 +4,19 @@
 # Disable directory browsing
 Options -Indexes
 
+# Compress text responses (pages, CSS, JavaScript, JSON, SVG)
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json image/svg+xml
+</IfModule>
+
+# Let browsers keep images and icons for a week (uploaded files get unique names).
+# /assets has its own, longer rule (assets/.htaccess).
+<IfModule mod_headers.c>
+    <FilesMatch "\.(?i:png|jpe?g|gif|webp|ico)$">
+        Header set Cache-Control "public, max-age=604800"
+    </FilesMatch>
+</IfModule>
+
 # Block direct access to sensitive files, scripts, database dumps, and configuration files
 <FilesMatch "\.(?i:sql|bat|cmd|sh|ps1|md|env|ini|config|cfg|yml|yaml|json|lock|log|bak|backup|old|dist|htaccess|htpasswd)$">
     <IfModule mod_authz_core.c>

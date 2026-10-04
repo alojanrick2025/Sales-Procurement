@@ -12,27 +12,49 @@ define('GOOGLE_CLIENT_ID', trim(getenv('GOOGLE_CLIENT_ID') ?: ''));
 define('GOOGLE_CLIENT_SECRET', trim(getenv('GOOGLE_CLIENT_SECRET') ?: ''));
 define('GOOGLE_REDIRECT_URI', trim(getenv('GOOGLE_REDIRECT_URI') ?: ''));
 
-// Create database connection
+// Connection pooling: each Apache worker keeps its database connection open between
+// requests ("p:" persistent connection), so pages skip the TCP + TLS handshake to the
+// cloud database. Set DB_PERSISTENT=0 to open a fresh connection per request instead.
+define('DB_PERSISTENT', getenv('DB_PERSISTENT') !== '0');
+
+/**
+ * The request's shared connection. Pages still call $conn->close() when they are done,
+ * but the session handler, header and page all use this one connection, so close()
+ * does nothing; PHP releases the connection when the request ends.
+ */
+class SharedDbConnection extends mysqli {
+    #[\ReturnTypeWillChange]
+    public function close() {
+        return true;
+    }
+}
+
+// Create database connection (one per request, see SharedDbConnection)
 function getDBConnection() {
+    static $shared = null;
+    if ($shared !== null) {
+        return $shared;
+    }
     try {
-        $conn = mysqli_init();
-        
+        $host = (DB_PERSISTENT ? 'p:' : '') . DB_HOST;
+        $conn = new SharedDbConnection();
+
         // For cloud databases (like TiDB, Aiven) that require SSL
         $flags = (DB_HOST !== 'localhost') ? MYSQLI_CLIENT_SSL : 0;
-        
-        @mysqli_real_connect($conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT, NULL, $flags);
-        
+
+        @mysqli_real_connect($conn, $host, DB_USER, DB_PASS, DB_NAME, DB_PORT, NULL, $flags);
+
         // Fallback to legacy database if it doesn't exist yet
         if ($conn->connect_error) {
-            $conn = mysqli_init();
-            @mysqli_real_connect($conn, DB_HOST, DB_USER, DB_PASS, 'sales_procurement', DB_PORT, NULL, $flags);
-            
+            $conn = new SharedDbConnection();
+            @mysqli_real_connect($conn, $host, DB_USER, DB_PASS, 'sales_procurement', DB_PORT, NULL, $flags);
+
             if ($conn->connect_error) {
                 die("Connection failed: " . $conn->connect_error);
             }
         }
-        
-        return $conn;
+
+        return $shared = $conn;
     } catch (Exception $e) {
         die("Database connection error: " . $e->getMessage());
     }
@@ -183,6 +205,21 @@ function faviconTag() {
         . '    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' . "\n";
 }
 
+// URL of a file in /assets with its modification time attached, so browsers can cache
+// it for a long time (see .htaccess) yet fetch the new copy as soon as it changes
+function assetUrl($path) {
+    $mtime = @filemtime(__DIR__ . $path);
+    return $path . ($mtime ? '?v=' . $mtime : '');
+}
+
+// Phosphor icons: only the bold weight is used (class "ph-bold"). The font is preloaded
+// so icons appear together with the text instead of after the stylesheet arrives.
+function iconFontTags() {
+    $base = 'https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/bold/';
+    return '<link rel="preload" href="' . $base . 'Phosphor-Bold.woff2" as="font" type="font/woff2" crossorigin>' . "\n"
+        . '    <link rel="stylesheet" href="' . $base . 'style.css">' . "\n";
+}
+
 // Google Sign-In is shown only when credentials are configured
 function isGoogleLoginEnabled() {
     return GOOGLE_CLIENT_ID !== '' && GOOGLE_CLIENT_SECRET !== '';
@@ -261,9 +298,31 @@ function getCurrentAdmin() {
     return ($user && $user['user_type'] === 'admin') ? $user : null;
 }
 
+// Settings are read on every page but change rarely, so they are also kept in APCu
+// shared memory (when the extension is enabled) for a minute. Code that changes
+// system_info calls forgetSystemInfoCache() so the change shows on the next page.
+define('SYSTEM_INFO_CACHE_KEY', 'system_info:' . DB_HOST . ':' . DB_NAME);
+define('SYSTEM_INFO_CACHE_TTL', 60);
+
+function isApcuEnabled() {
+    return function_exists('apcu_enabled') && apcu_enabled();
+}
+
+function forgetSystemInfoCache() {
+    if (isApcuEnabled()) {
+        apcu_delete(SYSTEM_INFO_CACHE_KEY);
+    }
+}
+
 // Get system info settings
 function getSystemInfo() {
     static $sysInfo = null;
+    if ($sysInfo === null && isApcuEnabled()) {
+        $cached = apcu_fetch(SYSTEM_INFO_CACHE_KEY, $hit);
+        if ($hit && (int) ($cached['schema_version'] ?? 0) >= SCHEMA_VERSION) {
+            $sysInfo = $cached;
+        }
+    }
     if ($sysInfo === null) {
         $conn = getDBConnection();
         $res = $conn->query("SELECT meta_field, meta_value FROM system_info");
@@ -279,6 +338,9 @@ function getSystemInfo() {
             $sysInfo['schema_version'] = (string) SCHEMA_VERSION;
         }
         $conn->close();
+        if (isApcuEnabled()) {
+            apcu_store(SYSTEM_INFO_CACHE_KEY, $sysInfo, SYSTEM_INFO_CACHE_TTL);
+        }
     }
     return $sysInfo;
 }
@@ -288,7 +350,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 1);
+define('SCHEMA_VERSION', 2);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -334,6 +396,34 @@ function migrateSchema($conn) {
                 $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
             } catch (mysqli_sql_exception $e) {
                 if ($e->getCode() !== 1060) { // 1060 = another request already added it
+                    throw $e;
+                }
+            }
+        }
+    }
+    $check->close();
+
+    // Indexes for the columns the list pages, dashboard and reports filter and sort on
+    $indexes = [
+        ['quotations', 'idx_created_at', '(created_at)'],
+        ['quotations', 'idx_status', '(status)'],
+        ['customer_orders', 'idx_order_date', '(order_date, id)'],
+        ['customer_orders', 'idx_status', '(status)'],
+        ['supplier_orders', 'idx_order_date', '(order_date, id)'],
+        ['supplier_orders', 'idx_status', '(status)'],
+        ['clients', 'idx_partner_type_name', '(partner_type, name)'],
+        ['item_list', 'idx_description', '(description)'],
+    ];
+    $check = $conn->prepare("SELECT COUNT(*) AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
+    foreach ($indexes as [$table, $index, $columns]) {
+        $check->bind_param("ss", $table, $index);
+        $check->execute();
+        if ((int) $check->get_result()->fetch_assoc()['n'] === 0) {
+            try {
+                $conn->query("ALTER TABLE `$table` ADD INDEX `$index` $columns");
+            } catch (mysqli_sql_exception $e) {
+                // 1061 = another request already added it, 1146 = table not created yet
+                if ($e->getCode() !== 1061 && $e->getCode() !== 1146) {
                     throw $e;
                 }
             }

@@ -55,36 +55,47 @@ SELECT
 FROM supplier_orders
 ";
 
-$outerSql = "SELECT * FROM ($sql) AS all_trans WHERE 1=1";
+$where = " WHERE 1=1";
 $params = [];
 $types = '';
 
 if (!empty($typeFilter)) {
-    $outerSql .= " AND transaction_type = ?";
+    $where .= " AND transaction_type = ?";
     $params[] = $typeFilter;
     $types .= 's';
 }
 
 if (!empty($statusFilter)) {
-    $outerSql .= " AND status = ?";
+    $where .= " AND status = ?";
     $params[] = $statusFilter;
     $types .= 's';
 }
 
 if (!empty($search)) {
-    $outerSql .= " AND (ref_number LIKE ? OR party_name LIKE ?)";
+    $where .= " AND (ref_number LIKE ? OR party_name LIKE ?)";
     $sParam = "%$search%";
     $params[] = $sParam;
     $params[] = $sParam;
     $types .= 'ss';
 }
 
-$outerSql .= " ORDER BY trans_datetime DESC, trans_date DESC";
+// Pagination
+require_once __DIR__ . '/../includes/pagination.php';
+$countStmt = $conn->prepare("SELECT COUNT(*) AS total FROM ($sql) AS all_trans" . $where);
+if (!empty($params)) {
+    $countStmt->bind_param($types, ...$params);
+}
+$countStmt->execute();
+$pagination = paginate($countStmt->get_result()->fetch_assoc()['total']);
+$countStmt->close();
+
+$outerSql = "SELECT * FROM ($sql) AS all_trans" . $where . " ORDER BY trans_datetime DESC, trans_date DESC LIMIT ? OFFSET ?";
+$params[] = $pagination['limit'];
+$params[] = $pagination['offset'];
+$types .= 'ii';
 
 $stmt = $conn->prepare($outerSql);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
+$stmt->bind_param($types, ...$params);
 $stmt->execute();
 $transactions = $stmt->get_result();
 ?>
@@ -205,6 +216,7 @@ $transactions = $stmt->get_result();
                 </tbody>
             </table>
         </div>
+        <div class="px-3 pb-3"><?php echo paginationLinks($pagination); ?></div>
     </div>
 </div>
 
