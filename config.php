@@ -350,7 +350,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 4);
+define('SCHEMA_VERSION', 5);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -453,9 +453,17 @@ function migrateSchema($conn) {
         $stmt->close();
     }
 
-    // Sample purchase orders with line items (loaded once, see includes/sample_data.php)
+    // Remove the sample quotation the first setup loaded with a total but no line items
+    // (same rule as the sample POs; also kept if a customer PO was made from it)
+    $conn->query("DELETE FROM quotations WHERE quotation_number = 'QT-2026-0001' AND grand_total = 50400.00
+        AND notes = 'Electrical supplies and equipment installation materials.'
+        AND NOT EXISTS (SELECT 1 FROM quotation_items WHERE quotation_items.quotation_id = quotations.id)
+        AND NOT EXISTS (SELECT 1 FROM customer_orders WHERE customer_orders.quotation_id = quotations.id)");
+
+    // Sample purchase orders and quotations with line items (loaded once, see includes/sample_data.php)
     require_once __DIR__ . '/includes/sample_data.php';
     loadSamplePurchaseOrders($conn);
+    loadSampleQuotations($conn);
 
     $version = (string) SCHEMA_VERSION;
     $stmt = $conn->prepare("INSERT INTO system_info (meta_field, meta_value) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");

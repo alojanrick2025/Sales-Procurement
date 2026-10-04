@@ -191,7 +191,7 @@ CREATE TABLE `quotations` (
 
 LOCK TABLES `quotations` WRITE;
 /*!40000 ALTER TABLE `quotations` DISABLE KEYS */;
-INSERT INTO `quotations` VALUES (1,'QT-2026-0001',1,'BRICOLAGE PHILIPPINES INC.','info@bricolage.ph','555-0199','Victorias City','Main Warehouse, Talisay City','Victorias City',45000.00,12.00,5400.00,50400.00,'2026-09-28','sent','Electrical supplies and equipment installation materials.',1,'2026-09-13 17:20:02','2026-09-13 17:20:02'),(2,'QT-2026-0002',3,'MUNICIPALITY OF CALATRAVA','','','MUNICIPALITY OF CALATRAVA, Calatrava, Negros Occidental','CAPITAN SABI BRGY. ZONE 4 TALISAY CITY NEG. OCC.','Calatrava',0.00,12.00,0.00,0.00,'2026-10-13','sent','',1,'2026-09-13 18:02:47','2026-09-13 19:07:21');
+INSERT INTO `quotations` VALUES (2,'QT-2026-0002',3,'MUNICIPALITY OF CALATRAVA','','','MUNICIPALITY OF CALATRAVA, Calatrava, Negros Occidental','CAPITAN SABI BRGY. ZONE 4 TALISAY CITY NEG. OCC.','Calatrava',0.00,12.00,0.00,0.00,'2026-10-13','sent','',1,'2026-09-13 18:02:47','2026-09-13 19:07:21');
 /*!40000 ALTER TABLE `quotations` ENABLE KEYS */;
 UNLOCK TABLES;
 
