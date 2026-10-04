@@ -55,6 +55,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $supplier_name = trim($_POST['supplier_name'] ?? '');
     $supplier_id = !empty($_POST['supplier_id']) ? intval($_POST['supplier_id']) : null;
     $order_date = $_POST['order_date'] ?? date('Y-m-d');
+    // Payment due date (includes/payments.php); defaults to 30 days after the order date
+    $due_date = trim($_POST['due_date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $due_date)) {
+        $due_date = date('Y-m-d', strtotime(($order_date ?: date('Y-m-d')) . ' +30 days'));
+    }
     $status = $_POST['status'] ?? 'pending';
     $notes = trim($_POST['notes'] ?? '');
 
@@ -102,13 +107,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $reverseResult = null;
             if ($editing) {
-                // Take the order's current items out of stock first; the edited items are applied below
-                $reverseResult = reverseOrderStock($conn, 'supplier', $editId);
-                if (!$reverseResult['ok']) {
-                    throw new Exception(htmlspecialchars($reverseResult['error']));
+                // Stock: an order that stays Completed with the same items is left alone.
+                // Otherwise its current items come out of stock here and the edited items
+                // go in below; the "enough stock" check is on the end result.
+                $newStockItems = [];
+                foreach ($validItems as $item) {
+                    if ($item['item_id']) {
+                        $newStockItems[$item['item_id']] = round(($newStockItems[$item['item_id']] ?? 0) + $item['quantity'], 2);
+                    }
                 }
-                $stmt = $conn->prepare("UPDATE supplier_orders SET po_number = ?, supplier_id = ?, supplier_name = ?, order_date = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?");
-                $stmt->bind_param("sissdssi", $po_number, $supplier_id, $supplier_name, $order_date, $grand_total, $status, $notes, $editId);
+                ksort($newStockItems);
+                $stockUnchanged = $editing['stock_applied'] && $status === 'completed'
+                    && orderStockItems($conn, 'supplier', $editId) == $newStockItems;
+                if (!$stockUnchanged) {
+                    $reverseResult = reverseOrderStock($conn, 'supplier', $editId, false);
+                    if (!$reverseResult['ok']) {
+                        throw new Exception(htmlspecialchars($reverseResult['error']));
+                    }
+                }
+                $stmt = $conn->prepare("UPDATE supplier_orders SET po_number = ?, supplier_id = ?, supplier_name = ?, order_date = ?, due_date = ?, total_amount = ?, status = ?, notes = ? WHERE id = ?");
+                $stmt->bind_param("sisssdssi", $po_number, $supplier_id, $supplier_name, $order_date, $due_date, $grand_total, $status, $notes, $editId);
                 $stmt->execute();
                 $stmt->close();
                 $stmt = $conn->prepare("DELETE FROM supplier_order_items WHERE supplier_order_id = ?");
@@ -117,8 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
                 $newId = $editId;
             } else {
-                $stmt = $conn->prepare("INSERT INTO supplier_orders (po_number, supplier_id, supplier_name, order_date, total_amount, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param("sissdss", $po_number, $supplier_id, $supplier_name, $order_date, $grand_total, $status, $notes);
+                $stmt = $conn->prepare("INSERT INTO supplier_orders (po_number, supplier_id, supplier_name, order_date, due_date, total_amount, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sisssdss", $po_number, $supplier_id, $supplier_name, $order_date, $due_date, $grand_total, $status, $notes);
                 if (!$stmt->execute())
                     throw new Exception("Error saving PO: " . $stmt->error);
                 $newId = $conn->insert_id;
@@ -137,6 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stockResult = syncOrderStock($conn, 'supplier', $newId);
             if (!$stockResult['ok']) {
                 throw new Exception(htmlspecialchars($stockResult['error']));
+            }
+            if (!empty($reverseResult['action'])) {
+                $short = negativeStockItems($conn, array_merge($reverseResult['item_ids'], $stockResult['item_ids']));
+                if ($short) {
+                    throw new Exception(htmlspecialchars('Not enough stock to change this order: ' . implode('; ', $short) . '. Receive or adjust the stock first.'));
+                }
             }
 
             $conn->commit();
@@ -157,6 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $form = [
     'po_number' => $nextPoNum,
     'order_date' => date('Y-m-d'),
+    'due_date' => date('Y-m-d', strtotime('+30 days')),
     'partner_id' => null,
     'partner_name' => '',
     'status' => 'pending',
@@ -167,6 +192,7 @@ if ($editing) {
     $form = [
         'po_number' => $editing['po_number'],
         'order_date' => $editing['order_date'],
+        'due_date' => $editing['due_date'] ?: date('Y-m-d', strtotime($editing['order_date'] . ' +30 days')),
         'partner_id' => $editing['supplier_id'],
         'partner_name' => $editing['supplier_name'],
         'status' => $editing['status'],
@@ -198,6 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error) {
     $form = [
         'po_number' => $po_number,
         'order_date' => $order_date,
+        'due_date' => $due_date,
         'partner_id' => $supplier_id,
         'partner_name' => $supplier_name,
         'status' => $status,
@@ -293,6 +320,11 @@ require_once __DIR__ . '/../includes/header.php';
                             <option value="<?php echo $option; ?>" <?php echo $form['status'] === $option ? 'selected' : ''; ?>><?php echo ucfirst($option); ?></option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Payment Due Date</label>
+                    <input type="date" class="form-control" name="due_date" value="<?php echo htmlspecialchars($form['due_date']); ?>">
+                    <div class="form-text">The order shows as overdue if not fully paid by this date.</div>
                 </div>
             </div>
         </div>

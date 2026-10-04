@@ -118,7 +118,7 @@ function syncOrderStock($conn, $kind, $orderId) {
     }
     $shouldApply = $order['status'] === 'completed';
     if ($shouldApply === (bool) $order['stock_applied']) {
-        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => []];
+        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => [], 'item_ids' => []];
     }
     return moveOrderStock($conn, $kind, $order, $shouldApply);
 }
@@ -128,15 +128,52 @@ function syncOrderStock($conn, $kind, $orderId) {
  * its status (used before editing an order's items; syncOrderStock() re-applies them).
  * Must run inside the caller's transaction.
  */
-function reverseOrderStock($conn, $kind, $orderId) {
+function reverseOrderStock($conn, $kind, $orderId, $checkStock = true) {
     $order = lockOrderForStock($conn, $kind, $orderId);
     if (!$order) {
         return ['ok' => false, 'error' => 'Order not found.'];
     }
     if (!$order['stock_applied']) {
-        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => []];
+        return ['ok' => true, 'action' => null, 'items' => 0, 'skipped' => [], 'item_ids' => []];
     }
-    return moveOrderStock($conn, $kind, $order, false);
+    return moveOrderStock($conn, $kind, $order, false, $checkStock);
+}
+
+/**
+ * Catalog items currently counted for an order, as [item_id => quantity]
+ * (used to tell whether an edit changed the items at all)
+ */
+function orderStockItems($conn, $kind, $orderId) {
+    $cfg = orderStockConfig($kind);
+    $stmt = $conn->prepare("SELECT item_id, SUM(quantity) AS qty FROM `{$cfg['items']}` WHERE `{$cfg['fk']}` = ? AND item_id IS NOT NULL GROUP BY item_id");
+    $stmt->bind_param("i", $orderId);
+    $stmt->execute();
+    $items = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $items[(int) $row['item_id']] = round((float) $row['qty'], 2);
+    }
+    $stmt->close();
+    ksort($items);
+    return $items;
+}
+
+// Items (by id) whose stock is below zero, as "Name (would be -N)"; empty when all is well
+function negativeStockItems($conn, $itemIds) {
+    $itemIds = array_values(array_unique(array_map('intval', $itemIds)));
+    if (!$itemIds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+    $stmt = $conn->prepare("SELECT name, stocks FROM item_list WHERE id IN ($placeholders) AND stocks < -0.001");
+    $stmt->bind_param(str_repeat('i', count($itemIds)), ...$itemIds);
+    $stmt->execute();
+    $short = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $name = html_entity_decode(str_ireplace('&quot;', '"', $row['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $short[] = $name . ' (stock would be ' . (0 + round((float) $row['stocks'], 2)) . ')';
+    }
+    $stmt->close();
+    return $short;
 }
 
 function lockOrderForStock($conn, $kind, $orderId) {
@@ -150,7 +187,7 @@ function lockOrderForStock($conn, $kind, $orderId) {
 }
 
 // Add ($apply = true) or remove an order's items from stock and set stock_applied
-function moveOrderStock($conn, $kind, $order, $shouldApply) {
+function moveOrderStock($conn, $kind, $order, $shouldApply, $checkStock = true) {
     $cfg = orderStockConfig($kind);
     $orderId = (int) $order['id'];
 
@@ -189,7 +226,7 @@ function moveOrderStock($conn, $kind, $order, $shouldApply) {
             $short[] = $name . ' (in stock ' . (0 + round($change['stock'], 2)) . ', needed ' . (0 + round(-$change['delta'], 2)) . ')';
         }
     }
-    if ($short) {
+    if ($short && $checkStock) {
         if ($shouldApply) {
             $what = 'complete this order';
         } elseif ($order['status'] === 'completed') {
@@ -228,7 +265,7 @@ function moveOrderStock($conn, $kind, $order, $shouldApply) {
     $stmt->execute();
     $stmt->close();
 
-    return ['ok' => true, 'action' => $shouldApply ? 'applied' : 'reversed', 'items' => count($changes), 'skipped' => $skipped];
+    return ['ok' => true, 'action' => $shouldApply ? 'applied' : 'reversed', 'items' => count($changes), 'skipped' => $skipped, 'item_ids' => array_keys($changes)];
 }
 
 // One-line summary of syncOrderStock() for the page message

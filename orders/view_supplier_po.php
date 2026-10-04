@@ -2,6 +2,7 @@
 $pageTitle = 'View Supplier Purchase Order';
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/inventory.php';
+require_once __DIR__ . '/../includes/payments.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -25,6 +26,30 @@ $error = '';
 if (!empty($_SESSION['po_flash'])) {
     $success = $_SESSION['po_flash'];
     unset($_SESSION['po_flash']);
+}
+if (!empty($_SESSION['po_flash_error'])) {
+    $error = $_SESSION['po_flash_error'];
+    unset($_SESSION['po_flash_error']);
+}
+
+// Record or delete a payment (includes/payments.php), then reload the page
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['payment_action'])) {
+    if (!validateCsrfToken()) {
+        $_SESSION['po_flash_error'] = 'Invalid security token. Please try again.';
+    } elseif ($_POST['payment_action'] === 'add') {
+        $result = addPayment($conn, 'supplier', $id, $_POST['amount'] ?? 0, $_POST['payment_date'] ?? '', $_POST['method'] ?? '', $_POST['reference'] ?? '', $_POST['payment_notes'] ?? '');
+        if ($result['ok']) {
+            $_SESSION['po_flash'] = 'Payment of ₱' . number_format((float) $_POST['amount'], 2) . ' recorded.';
+        } else {
+            $_SESSION['po_flash_error'] = $result['error'];
+        }
+    } elseif ($_POST['payment_action'] === 'delete') {
+        if (deletePayment($conn, 'supplier', $id, intval($_POST['payment_id'] ?? 0))) {
+            $_SESSION['po_flash'] = 'Payment deleted.';
+        }
+    }
+    header('Location: /orders/view_supplier_po.php?id=' . $id);
+    exit();
 }
 
 // Handle status update with CSRF validation
@@ -72,6 +97,9 @@ while ($row = $itemsResult->fetch_assoc()) {
     $items[] = $row;
 }
 $itemsStmt->close();
+
+$payments = orderPayments($conn, 'supplier', $id);
+$payment = paymentSummary($po['total_amount'], array_sum(array_column($payments, 'amount')), $po['due_date'] ?? null, $po['status']);
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
@@ -266,6 +294,88 @@ require_once __DIR__ . '/../includes/header.php';
                 </tfoot>
             </table>
         </div>
+    </div>
+</div>
+
+<!-- Payments -->
+<div class="card shadow-sm mb-4" id="payments">
+    <div class="card-header bg-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <h5 class="mb-0 fw-semibold text-dark"><i class="ph-bold ph-wallet text-primary me-2"></i>Payments Made to Supplier</h5>
+        <span class="badge <?php echo $payment['badge']; ?> px-3 py-2"><?php echo htmlspecialchars($payment['label']); ?><?php echo $payment['overdue'] ? ' (' . $payment['days_overdue'] . ' day' . ($payment['days_overdue'] === 1 ? '' : 's') . ')' : ''; ?></span>
+    </div>
+    <div class="card-body p-4">
+        <div class="row g-3 mb-3 text-center">
+            <div class="col-6 col-md-3"><div class="small text-muted">Order Total</div><div class="fw-bold fs-5">₱<?php echo number_format($payment['total'], 2); ?></div></div>
+            <div class="col-6 col-md-3"><div class="small text-muted">Paid</div><div class="fw-bold fs-5 text-success">₱<?php echo number_format($payment['paid'], 2); ?></div></div>
+            <div class="col-6 col-md-3"><div class="small text-muted">Balance</div><div class="fw-bold fs-5 <?php echo $payment['balance'] > 0.004 ? 'text-danger' : 'text-dark'; ?>">₱<?php echo number_format($payment['balance'], 2); ?></div></div>
+            <div class="col-6 col-md-3"><div class="small text-muted">Due Date</div><div class="fw-bold fs-5"><?php echo !empty($po['due_date']) ? date('M d, Y', strtotime($po['due_date'])) : '-'; ?></div></div>
+        </div>
+
+        <?php if ($payments): ?>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr><th>Date</th><th class="text-end">Amount</th><th>Method</th><th>Reference</th><th>Notes</th><th>Recorded By</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($payments as $pm): ?>
+                            <tr>
+                                <td><?php echo date('M d, Y', strtotime($pm['payment_date'])); ?></td>
+                                <td class="text-end fw-semibold">₱<?php echo number_format($pm['amount'], 2); ?></td>
+                                <td><?php echo htmlspecialchars($pm['method']); ?></td>
+                                <td><?php echo htmlspecialchars($pm['reference'] ?? ''); ?></td>
+                                <td class="small"><?php echo htmlspecialchars($pm['notes'] ?? ''); ?></td>
+                                <td class="small text-muted"><?php echo htmlspecialchars($pm['full_name'] ?: ($pm['username'] ?: '-')); ?></td>
+                                <td class="text-end">
+                                    <form method="POST" action="" class="d-inline" onsubmit="return confirm('Delete this payment?')">
+                                        <?php echo csrfField(); ?>
+                                        <input type="hidden" name="payment_action" value="delete">
+                                        <input type="hidden" name="payment_id" value="<?php echo (int) $pm['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete payment"><i class="ph-bold ph-trash"></i></button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <p class="text-muted small mb-3">No payments recorded yet.</p>
+        <?php endif; ?>
+
+        <?php if ($po['status'] !== 'cancelled' && $payment['balance'] > 0.004): ?>
+            <form method="POST" action="" class="row g-2 align-items-end border-top pt-3">
+                <?php echo csrfField(); ?>
+                <input type="hidden" name="payment_action" value="add">
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-semibold text-muted">Date</label>
+                    <input type="date" class="form-control" name="payment_date" value="<?php echo date('Y-m-d'); ?>" required>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-semibold text-muted">Amount (₱)</label>
+                    <input type="number" step="0.01" min="0.01" max="<?php echo number_format($payment['balance'], 2, '.', ''); ?>" class="form-control" name="amount" value="<?php echo number_format($payment['balance'], 2, '.', ''); ?>" required>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-semibold text-muted">Method</label>
+                    <select class="form-select" name="method">
+                        <?php foreach (PAYMENT_METHODS as $method): ?>
+                            <option value="<?php echo $method; ?>"><?php echo $method; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-semibold text-muted">Reference</label>
+                    <input type="text" class="form-control" name="reference" maxlength="100" placeholder="OR / check no.">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label small fw-semibold text-muted">Notes</label>
+                    <input type="text" class="form-control" name="payment_notes" maxlength="255">
+                </div>
+                <div class="col-12 col-md-2">
+                    <button type="submit" class="btn btn-primary w-100"><i class="ph-bold ph-plus-circle"></i> Record Payment</button>
+                </div>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 

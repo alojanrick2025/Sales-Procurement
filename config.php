@@ -1,4 +1,7 @@
 <?php
+// Dates (today, default order dates, overdue payments) use the business's local time
+date_default_timezone_set(getenv('APP_TIMEZONE') ?: 'Asia/Manila');
+
 // Database configuration
 define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
 define('DB_USER', getenv('DB_USER') ?: 'root');
@@ -350,7 +353,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 7);
+define('SCHEMA_VERSION', 8);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -393,6 +396,9 @@ function migrateSchema($conn) {
         ['customer_orders', 'stock_applied', 'TINYINT(1) NOT NULL DEFAULT 0'],
         // Low-stock alerts: an item is low when its stock is at or below this level
         ['item_list', 'reorder_level', 'DECIMAL(12,2) NOT NULL DEFAULT 10.00'],
+        // Payments (includes/payments.php): when each order should be paid
+        ['customer_orders', 'due_date', 'DATE DEFAULT NULL'],
+        ['supplier_orders', 'due_date', 'DATE DEFAULT NULL'],
     ];
     $check = $conn->prepare("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     foreach ($columns as [$table, $column, $definition]) {
@@ -406,6 +412,10 @@ function migrateSchema($conn) {
                 if ($column === 'stock_applied') {
                     $conn->query("UPDATE `$table` SET stock_applied = 1 WHERE status = 'completed'");
                 }
+                // Existing orders are due 30 days after their order date (the New PO default)
+                if ($column === 'due_date') {
+                    $conn->query("UPDATE `$table` SET due_date = DATE_ADD(order_date, INTERVAL 30 DAY) WHERE due_date IS NULL");
+                }
             } catch (mysqli_sql_exception $e) {
                 if ($e->getCode() !== 1060) { // 1060 = another request already added it
                     throw $e;
@@ -414,6 +424,22 @@ function migrateSchema($conn) {
         }
     }
     $check->close();
+
+    // Payments received from customers / made to suppliers against purchase orders
+    $conn->query("CREATE TABLE IF NOT EXISTS payments (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        order_type VARCHAR(10) NOT NULL,
+        order_id INT NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        payment_date DATE NOT NULL,
+        method VARCHAR(30) NOT NULL,
+        reference VARCHAR(100) DEFAULT NULL,
+        notes VARCHAR(255) DEFAULT NULL,
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_order (order_type, order_id),
+        KEY idx_payment_date (payment_date)
+    )");
 
     // Stock history: one row per change to an item's stock
     $conn->query("CREATE TABLE IF NOT EXISTS stock_movements (

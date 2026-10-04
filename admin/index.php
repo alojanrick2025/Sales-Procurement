@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Dashboard';
 require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/payments.php';
 
 $conn = getDBConnection();
 
@@ -90,6 +91,10 @@ LIMIT 10;
 ";
 
 $recentTransactions = $conn->query($recentTransSql);
+
+// Money owed to us (customer POs) and by us (supplier POs), with the most overdue orders
+$receivables = outstandingSummary($conn, 'customer');
+$payables = outstandingSummary($conn, 'supplier');
 
 // Low-stock alert: active items at or below their reorder level, biggest shortfall first.
 // Suggested order: enough to bring the item up to twice its reorder level.
@@ -240,6 +245,84 @@ $conn->close();
                     <h6 class="text-muted small mb-0">Procurement Activity Spend</h6>
                     <h4 class="mb-0 fw-bold" style="color: #16231D;">₱<?php echo number_format($totalProcValue, 2); ?></h4>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Receivables and payables -->
+<div class="row mb-4 g-3">
+    <div class="col-lg-6">
+        <div class="card shadow-sm border h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center border-bottom py-3">
+                <h5 class="mb-0 fw-bold" style="color: #16231D;"><i class="ph-bold ph-hand-coins me-1" style="color: #16A34A;"></i> Receivables</h5>
+                <span class="small text-muted">Customers owe you</span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center g-2 mb-2">
+                    <div class="col-6">
+                        <div class="small text-muted">Outstanding (<?php echo (int) $receivables['orders']; ?> order<?php echo (int) $receivables['orders'] === 1 ? '' : 's'; ?>)</div>
+                        <div class="fs-4 fw-bold" style="color: #16231D;">₱<?php echo number_format((float) $receivables['outstanding'], 2); ?></div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">Overdue (<?php echo (int) $receivables['overdue_count']; ?>)</div>
+                        <div class="fs-4 fw-bold <?php echo (float) $receivables['overdue_amount'] > 0 ? 'text-danger' : 'text-muted'; ?>">₱<?php echo number_format((float) $receivables['overdue_amount'], 2); ?></div>
+                    </div>
+                </div>
+                <?php if ($receivables['overdue_orders']): ?>
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr><th>PO #</th><th><?php echo 'Customer'; ?></th><th>Due</th><th class="text-end">Balance</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($receivables['overdue_orders'] as $od): ?>
+                                <tr>
+                                    <td><a href="/orders/view_customer_po.php?id=<?php echo (int) $od['id']; ?>#payments"><?php echo htmlspecialchars($od['po_number']); ?></a></td>
+                                    <td class="small"><?php echo htmlspecialchars($od['party']); ?></td>
+                                    <td class="small text-danger text-nowrap"><?php echo date('M d, Y', strtotime($od['due_date'])); ?></td>
+                                    <td class="text-end fw-semibold">₱<?php echo number_format((float) $od['balance'], 2); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <div class="text-center text-muted small py-2"><i class="ph-bold ph-check-circle text-success"></i> Nothing overdue.</div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card shadow-sm border h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center border-bottom py-3">
+                <h5 class="mb-0 fw-bold" style="color: #16231D;"><i class="ph-bold ph-money me-1" style="color: #DC2626;"></i> Payables</h5>
+                <span class="small text-muted">You owe suppliers</span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center g-2 mb-2">
+                    <div class="col-6">
+                        <div class="small text-muted">Outstanding (<?php echo (int) $payables['orders']; ?> order<?php echo (int) $payables['orders'] === 1 ? '' : 's'; ?>)</div>
+                        <div class="fs-4 fw-bold" style="color: #16231D;">₱<?php echo number_format((float) $payables['outstanding'], 2); ?></div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">Overdue (<?php echo (int) $payables['overdue_count']; ?>)</div>
+                        <div class="fs-4 fw-bold <?php echo (float) $payables['overdue_amount'] > 0 ? 'text-danger' : 'text-muted'; ?>">₱<?php echo number_format((float) $payables['overdue_amount'], 2); ?></div>
+                    </div>
+                </div>
+                <?php if ($payables['overdue_orders']): ?>
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr><th>PO #</th><th><?php echo 'Supplier'; ?></th><th>Due</th><th class="text-end">Balance</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($payables['overdue_orders'] as $od): ?>
+                                <tr>
+                                    <td><a href="/orders/view_supplier_po.php?id=<?php echo (int) $od['id']; ?>#payments"><?php echo htmlspecialchars($od['po_number']); ?></a></td>
+                                    <td class="small"><?php echo htmlspecialchars($od['party']); ?></td>
+                                    <td class="small text-danger text-nowrap"><?php echo date('M d, Y', strtotime($od['due_date'])); ?></td>
+                                    <td class="text-end fw-semibold">₱<?php echo number_format((float) $od['balance'], 2); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <div class="text-center text-muted small py-2"><i class="ph-bold ph-check-circle text-success"></i> Nothing overdue.</div>
+                <?php endif; ?>
             </div>
         </div>
     </div>

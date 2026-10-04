@@ -3,6 +3,7 @@ $pageTitle = 'Supplier Purchase Orders';
 require_once __DIR__ . '/../config.php';
 requireLogin();
 require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/payments.php';
 
 $conn = getDBConnection();
 
@@ -16,7 +17,8 @@ $bpSuppliers = [];
 while ($bps = $bpSuppliersRes->fetch_assoc())
     $bpSuppliers[] = $bps;
 
-$query = "SELECT * FROM supplier_orders WHERE 1=1";
+// Each order with the amount paid so far (includes/payments.php)
+$query = "SELECT o.*, COALESCE(p.paid, 0) AS paid FROM supplier_orders o LEFT JOIN " . paidSubquery('supplier') . " p ON p.order_id = o.id WHERE 1=1";
 $params = [];
 $types = '';
 
@@ -120,6 +122,7 @@ $result = $stmt->get_result();
                         <th>Order Date</th>
                         <th>Total Amount</th>
                         <th>Status</th>
+                        <th>Payment</th>
                         <th>Notes</th>
                         <th>Actions</th>
                     </tr>
@@ -149,6 +152,13 @@ $result = $stmt->get_result();
                                         <?php echo ucfirst($po['status']); ?>
                                     </span>
                                 </td>
+                                <td>
+                                    <?php $pay = paymentSummary($po['total_amount'], $po['paid'], $po['due_date'] ?? null, $po['status']); ?>
+                                    <span class="badge <?php echo $pay['badge']; ?>"><?php echo htmlspecialchars($pay['label']); ?></span>
+                                    <?php if ($pay['balance'] > 0.004 && $po['status'] !== 'cancelled'): ?>
+                                        <div class="small text-muted text-nowrap">Bal. ₱<?php echo number_format($pay['balance'], 2); ?></div>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-muted small"><?php echo htmlspecialchars($po['notes'] ?? '-'); ?></td>
                                 <td>
                                     <a href="/orders/view_supplier_po.php?id=<?php echo $po['id']; ?>"
@@ -160,7 +170,7 @@ $result = $stmt->get_result();
                         <?php endwhile; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-4">No Supplier Purchase Orders found.</td>
+                            <td colspan="8" class="text-center text-muted py-4">No Supplier Purchase Orders found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -182,7 +192,7 @@ require_once __DIR__ . '/../includes/footer.php';
         const tbody = document.getElementById('poTableBody');
         const noResultsRow = document.createElement('tr');
         noResultsRow.id = 'noResultsRow';
-        noResultsRow.innerHTML = '<td colspan="7" class="text-center text-muted py-4">No results found.</td>';
+        noResultsRow.innerHTML = '<td colspan="8" class="text-center text-muted py-4">No results found.</td>';
 
         function filterTable() {
             const query = searchInput.value.toLowerCase().trim();
