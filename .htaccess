@@ -39,6 +39,7 @@ RewriteRule "(^|/)\." - [F]
 # Block direct web access to sensitive internal directories
 RewriteRule ^migrations(/.*)?$ - [F,L]
 RewriteRule ^scratch(/.*)?$ - [F,L]
+RewriteRule ^vendor(/.*)?$ - [F,L]
 
 # Serve static files directly (CSS, JS, images, fonts)
 RewriteCond %{REQUEST_FILENAME} -f

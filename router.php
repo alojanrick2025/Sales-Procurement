@@ -22,8 +22,8 @@ if (preg_match('/\.(sql|bat|cmd|sh|ps1|md|env|ini|config|cfg|yml|yaml|json|lock|
     exit();
 }
 
-// Block direct access to internal directories (migrations, scratch)
-if (preg_match('/^(migrations|scratch)(\/|$)/i', $normalized_path)) {
+// Block direct access to internal directories (migrations, scratch, Composer packages)
+if (preg_match('/^(migrations|scratch|vendor)(\/|$)/i', $normalized_path)) {
     http_response_code(403);
     echo "<h1>403 - Forbidden</h1><p>Access to this directory is prohibited.</p>";
     exit();

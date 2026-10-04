@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Create Quotation';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/quotation_scan.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -151,6 +152,23 @@ require_once __DIR__ . '/../includes/header.php';
         <i class="ph-bold ph-warning-circle"></i> <?php echo htmlspecialchars($error); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
+<?php endif; ?>
+
+<?php if (isQuotationScanEnabled()): ?>
+<!-- Scan a quotation image: fills in the form below -->
+<div class="card shadow-sm mb-4" id="scanCard">
+    <div class="card-body d-flex flex-wrap align-items-center gap-3">
+        <div class="flex-grow-1">
+            <h6 class="mb-1"><i class="ph-bold ph-scan"></i> Scan a quotation</h6>
+            <div class="small text-muted">Upload a photo or screenshot of a quotation to fill in the customer and items. Check everything before saving.</div>
+        </div>
+        <input type="file" id="scanFileInput" accept="image/jpeg,image/png,image/webp,image/gif" class="d-none">
+        <button type="button" class="btn btn-outline-primary" id="scanBtn">
+            <i class="ph-bold ph-upload-simple"></i> Scan Quotation Image
+        </button>
+        <div id="scanStatus" class="w-100" aria-live="polite"></div>
+    </div>
+</div>
 <?php endif; ?>
 
 <form method="POST" action="" id="quotationForm">
@@ -418,7 +436,10 @@ require_once __DIR__ . '/../includes/header.php';
                     row.querySelector('.item-name-input').value = opt.getAttribute('data-name') || '';
                     row.querySelector('.item-desc-input').value = opt.getAttribute('data-desc') || '';
                     row.querySelector('.item-unit-input').value = opt.getAttribute('data-unit') || '';
-                    row.querySelector('.item-price-input').value = parseFloat(opt.getAttribute('data-price') || 0).toFixed(2);
+                    // A scanned row keeps the unit cost read from the quotation image
+                    const price = row.dataset.scannedPrice !== undefined ? row.dataset.scannedPrice : (opt.getAttribute('data-price') || 0);
+                    row.querySelector('.item-price-input').value = parseFloat(price).toFixed(2);
+                    row.classList.remove('table-warning');
                     calculateTotals();
                 } else {
                     row.querySelector('.item-id-input').value = '';
@@ -468,12 +489,15 @@ require_once __DIR__ . '/../includes/header.php';
         });
 
         // Add new row button
-        document.getElementById('addRowBtn').addEventListener('click', function () {
+        function addRow() {
             const tbody = document.getElementById('itemsBody');
             const firstRow = tbody.querySelector('.item-row');
             const newRow = firstRow.cloneNode(true);
 
             // Reset values to blank
+            newRow.classList.remove('table-warning');
+            delete newRow.dataset.scannedPrice;
+            newRow.querySelectorAll('.scan-hint').forEach(function (el) { el.remove(); });
             newRow.querySelector('.item-catalog-select').selectedIndex = 0;
             newRow.querySelector('.item-id-input').value = '';
             newRow.querySelector('.item-name-input').value = '';
@@ -489,9 +513,190 @@ require_once __DIR__ . '/../includes/header.php';
             tbody.appendChild(newRow);
             bindRowEvents(newRow);
             calculateTotals();
-        });
+            return newRow;
+        }
+        document.getElementById('addRowBtn').addEventListener('click', addRow);
 
         calculateTotals();
+
+        // ---- Scan a quotation image ----
+        const scanBtn = document.getElementById('scanBtn');
+        if (!scanBtn) {
+            return;
+        }
+        const scanInput = document.getElementById('scanFileInput');
+        const scanStatus = document.getElementById('scanStatus');
+        const peso = function (n) {
+            return '₱' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        function showScanStatus(type, lines) {
+            scanStatus.innerHTML = '';
+            const box = document.createElement('div');
+            box.className = 'alert alert-' + type + ' mb-0 mt-2 small';
+            lines.forEach(function (line, i) {
+                const div = document.createElement('div');
+                if (i > 0) div.className = 'mt-1';
+                div.textContent = line;
+                box.appendChild(div);
+            });
+            scanStatus.appendChild(box);
+        }
+
+        // Shrink large photos before upload: the model reads at most 2576 px on the long
+        // edge, and the API accepts images up to 5 MB
+        async function prepareImage(file) {
+            try {
+                const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+                const scale = Math.min(1, 2576 / Math.max(bitmap.width, bitmap.height));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.round(bitmap.width * scale);
+                canvas.height = Math.round(bitmap.height * scale);
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                for (const quality of [0.9, 0.75, 0.6]) {
+                    const blob = await new Promise(function (resolve) { canvas.toBlob(resolve, 'image/jpeg', quality); });
+                    if (blob && blob.size <= 5 * 1024 * 1024) {
+                        return blob;
+                    }
+                }
+            } catch (e) {
+                // Browser could not decode it here; let the server check the original file
+            }
+            return file;
+        }
+
+        function rowHasItem(row) {
+            return row.querySelector('.item-catalog-select').value !== '';
+        }
+
+        function fillFromScan(result) {
+            const scan = result.extraction || {};
+            const match = result.match || { client_id: null, items: [] };
+            const notes = [];
+            let warn = false;
+
+            // Customer
+            if (match.client_id) {
+                clientSelect.value = String(match.client_id);
+                clientSelect.dispatchEvent(new Event('change'));
+            } else if (scan.customer) {
+                notes.push('Customer "' + scan.customer + '" is not in Business Partners. Select the company yourself (or add it under Business Partners first).');
+                warn = true;
+            } else {
+                notes.push('No customer could be read. Select the company yourself.');
+                warn = true;
+            }
+            if (scan.address) {
+                document.getElementById('clientAddress').value = scan.address;
+            }
+
+            // Items: replace the current rows with the scanned ones
+            const items = Array.isArray(scan.items) ? scan.items : [];
+            const tbody = document.getElementById('itemsBody');
+            const rows = tbody.querySelectorAll('.item-row');
+            rows.forEach(function (row, i) {
+                if (i > 0) row.remove();
+            });
+            const firstRow = tbody.querySelector('.item-row');
+            const firstSelect = firstRow.querySelector('.item-catalog-select');
+            firstSelect.value = '';
+            firstSelect.dispatchEvent(new Event('change'));
+            firstRow.classList.remove('table-warning');
+            delete firstRow.dataset.scannedPrice;
+            firstRow.querySelectorAll('.scan-hint').forEach(function (el) { el.remove(); });
+
+            let unmatched = 0;
+            items.forEach(function (item, i) {
+                const row = i === 0 ? firstRow : addRow();
+                if (item.unit_cost !== null && item.unit_cost !== undefined) {
+                    row.dataset.scannedPrice = String(item.unit_cost);
+                }
+                const select = row.querySelector('.item-catalog-select');
+                const catalogId = match.items ? match.items[i] : null;
+                if (catalogId) {
+                    select.value = String(catalogId);
+                    select.dispatchEvent(new Event('change'));
+                } else {
+                    unmatched++;
+                    row.classList.add('table-warning');
+                    const hint = document.createElement('div');
+                    hint.className = 'scan-hint small text-danger mt-1';
+                    hint.textContent = 'Scanned: ' + (item.item_description || '(no description)') + ' - choose the matching item';
+                    select.parentNode.insertBefore(hint, select.nextSibling);
+                }
+                row.querySelector('.item-qty-input').value = item.quantity || 1;
+                row.querySelector('.item-markup-input').value = 0;
+            });
+            document.getElementById('globalMarkupInput').value = 0;
+            calculateTotals();
+
+            if (items.length === 0) {
+                notes.push('No item rows could be read from the image.');
+                warn = true;
+            } else {
+                notes.push(items.length + ' item' + (items.length === 1 ? '' : 's') + ' read from the image.');
+            }
+            if (unmatched > 0) {
+                notes.push(unmatched + ' item' + (unmatched === 1 ? ' is' : 's are') + ' not in Inventory (highlighted). Choose the matching item for each; the scanned quantity and unit cost are kept.');
+                warn = true;
+            }
+
+            // Compare the form's total with the total printed on the quotation
+            const grandText = document.getElementById('grandTotalDisplay').textContent.replace(/[^0-9.]/g, '');
+            const grand = parseFloat(grandText) || 0;
+            if (scan.total !== null && scan.total !== undefined && unmatched === 0) {
+                if (Math.abs(grand - scan.total) < 0.01) {
+                    notes.push('Total matches the quotation: ' + peso(scan.total) + '.');
+                } else {
+                    notes.push('The quotation shows a total of ' + peso(scan.total) + ' but the items add up to ' + peso(grand) + '. Check the quantities and prices.');
+                    warn = true;
+                }
+            }
+            if (scan.quote_number || scan.date) {
+                notes.push('Scanned quotation ' + (scan.quote_number || '') + (scan.date ? ' dated ' + scan.date : '') + '. This quotation gets its own number when saved.');
+            }
+            showScanStatus(warn ? 'warning' : 'success', notes);
+        }
+
+        scanBtn.addEventListener('click', function () {
+            const hasItems = Array.from(document.querySelectorAll('.item-row')).some(rowHasItem);
+            if (hasItems && !confirm('Scanning replaces the items you have entered. Continue?')) {
+                return;
+            }
+            scanInput.value = '';
+            scanInput.click();
+        });
+
+        scanInput.addEventListener('change', async function () {
+            const file = scanInput.files[0];
+            if (!file) return;
+            scanBtn.disabled = true;
+            showScanStatus('info', ['Reading the quotation... this can take up to a minute.']);
+            try {
+                const image = await prepareImage(file);
+                const body = new FormData();
+                body.append('image', image, 'quotation.jpg');
+                body.append('csrf_token', <?php echo json_encode(getCsrfToken()); ?>);
+                const response = await fetch('/quotation/scan_quotation.php', { method: 'POST', body: body, credentials: 'same-origin' });
+                let result;
+                try {
+                    result = await response.json();
+                } catch (e) {
+                    throw new Error('The server returned an unexpected response.');
+                }
+                if (!result.ok) {
+                    throw new Error(result.error || 'The quotation could not be scanned.');
+                }
+                fillFromScan(result);
+            } catch (e) {
+                showScanStatus('danger', [e.message || 'The quotation could not be scanned.']);
+            } finally {
+                scanBtn.disabled = false;
+            }
+        });
     });
 </script>
 
