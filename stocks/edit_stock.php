@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Edit Stock Level';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -32,18 +33,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $newStock = floatval($_POST['stocks'] ?? 0);
     $remarks = trim($_POST['remarks'] ?? '');
 
-    if ($newStock < 0) {
+    if (!validateCsrfToken()) {
+        $error = 'Invalid security token. Please reload the page and try again.';
+    } elseif ($newStock < 0) {
         $error = 'Stock cannot be negative.';
     } else {
-        $updateStmt = $conn->prepare("UPDATE item_list SET stocks = ? WHERE id = ?");
-        $updateStmt->bind_param("di", $newStock, $itemId);
-        if ($updateStmt->execute()) {
-            $success = "Stock level for " . htmlspecialchars($item['name']) . " has been updated to " . number_format($newStock, 0) . " " . htmlspecialchars($item['unit']) . ".";
-            $item['stocks'] = $newStock;
+        // Recorded in the stock history with the remarks as its note (includes/inventory.php)
+        $result = adjustStock($conn, $itemId, 'set', $newStock, $remarks);
+        if ($result['ok']) {
+            $name = html_entity_decode(str_ireplace('&quot;', '"', $item['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $success = "Stock level for " . $name . " has been updated to " . number_format($result['balance'], 0) . " " . $item['unit'] . ".";
+            $item['stocks'] = $result['balance'];
         } else {
-            $error = 'Error updating stock: ' . $conn->error;
+            $error = $result['error'];
         }
-        $updateStmt->close();
     }
 }
 
@@ -74,6 +77,7 @@ require_once __DIR__ . '/../includes/header.php';
 <div class="card shadow-sm">
     <div class="card-body p-4">
         <form method="POST" action="">
+            <?php echo csrfField(); ?>
             <div class="row mb-3">
                 <div class="col-md-6">
                     <label class="form-label text-muted">Item Code</label>

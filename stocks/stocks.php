@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Stock Management';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -13,38 +14,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $itemId = intval($_POST['item_id'] ?? 0);
     $adjustmentType = $_POST['adjustment_type'] ?? 'add'; // 'add', 'subtract', 'set'
     $quantity = floatval($_POST['quantity'] ?? 0);
+    $reason = trim($_POST['reason'] ?? '');
 
-    if ($itemId > 0 && $quantity >= 0) {
-        $itemCheck = $conn->prepare("SELECT id, name, stocks FROM item_list WHERE id = ?");
-        $itemCheck->bind_param("i", $itemId);
-        $itemCheck->execute();
-        $itemRes = $itemCheck->get_result();
-
-        if ($itemRes->num_rows > 0) {
-            $itemData = $itemRes->fetch_assoc();
-            $currentStock = floatval($itemData['stocks']);
-            $newStock = $currentStock;
-
-            if ($adjustmentType === 'add') {
-                $newStock = $currentStock + $quantity;
-            } elseif ($adjustmentType === 'subtract') {
-                $newStock = max(0, $currentStock - $quantity);
-            } elseif ($adjustmentType === 'set') {
-                $newStock = max(0, $quantity);
-            }
-
-            $updateStmt = $conn->prepare("UPDATE item_list SET stocks = ? WHERE id = ?");
-            $updateStmt->bind_param("di", $newStock, $itemId);
-            if ($updateStmt->execute()) {
-                $success = "Stock for " . htmlspecialchars($itemData['name']) . " updated to " . number_format($newStock, 0) . ".";
-            } else {
-                $error = "Failed to update stock: " . $conn->error;
-            }
-            $updateStmt->close();
+    if (!validateCsrfToken()) {
+        $error = "Invalid security token. Please reload the page and try again.";
+    } elseif ($itemId > 0 && $quantity >= 0) {
+        // Recorded in the stock history (includes/inventory.php)
+        $result = adjustStock($conn, $itemId, $adjustmentType, $quantity, $reason);
+        if ($result['ok']) {
+            $success = "Stock for " . html_entity_decode(str_ireplace('&quot;', '"', $result['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8') . " updated to " . number_format($result['balance'], 0) . ".";
         } else {
-            $error = "Item not found.";
+            $error = $result['error'];
         }
-        $itemCheck->close();
     } else {
         $error = "Invalid item or quantity.";
     }
@@ -110,6 +91,9 @@ require_once __DIR__ . '/../includes/header.php';
     <div>
         <a href="/stocks/add_stock.php" class="btn btn-primary me-2">
             <i class="ph-bold ph-plus-circle"></i> Add / Receive Stock
+        </a>
+        <a href="/stocks/stock_history.php" class="btn btn-outline-dark me-2">
+            <i class="ph-bold ph-clock-counter-clockwise"></i> Stock History
         </a>
         <a href="/items/items.php" class="btn btn-outline-dark">
             <i class="ph-bold ph-archive"></i> Item Inventory
@@ -353,6 +337,10 @@ require_once __DIR__ . '/../includes/header.php';
                                             class="btn btn-outline-secondary" title="Detailed Edit">
                                             <i class="ph-bold ph-pencil-simple"></i>
                                         </a>
+                                        <a href="/stocks/stock_history.php?item_id=<?php echo $item['id']; ?>"
+                                            class="btn btn-outline-secondary" title="Stock History">
+                                            <i class="ph-bold ph-clock-counter-clockwise"></i>
+                                        </a>
                                     </div>
                                 </td>
                             </tr>
@@ -376,6 +364,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="modal-dialog">
         <form method="POST" action="" class="modal-content">
             <input type="hidden" name="action" value="adjust_stock">
+            <?php echo csrfField(); ?>
             <input type="hidden" name="item_id" id="modalItemId">
 
             <div class="modal-header">
@@ -404,6 +393,10 @@ require_once __DIR__ . '/../includes/header.php';
                     <label class="form-label" for="modalQuantity">Quantity</label>
                     <input type="number" step="any" min="0" class="form-control" name="quantity" id="modalQuantity"
                         required placeholder="Enter quantity">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="modalReason">Reason <span class="text-muted small">(saved in the stock history)</span></label>
+                    <input type="text" class="form-control" name="reason" id="modalReason" maxlength="255" placeholder="e.g. Physical count, damaged items, returned by customer">
                 </div>
             </div>
             <div class="modal-footer">

@@ -122,11 +122,12 @@ if (isset($_SESSION['success_message'])) {
                 <thead>
                     <tr>
                         <th style="width: 12%;">Code</th>
-                        <th style="width: 32%;">Name</th>
+                        <th style="width: 27%;">Name</th>
                         <th style="width: 8%;">Unit</th>
+                        <th style="width: 10%;">Cost</th>
                         <th style="width: 15%;">
                             <div class="d-inline-flex align-items-center gap-2">
-                                <span>Price</span>
+                                <span>Selling Price</span>
                                 <div class="btn-group btn-group-sm" role="group" aria-label="Sort by Price">
                                     <!-- Arrow Down: Lowest Price first -->
                                     <a href="<?php echo htmlspecialchars(buildSortUrl('price', 'asc', $priceSort, $stockSort)); ?>"
@@ -184,6 +185,7 @@ if (isset($_SESSION['success_message'])) {
                                 <td><span
                                         class="badge bg-light text-dark border"><?php echo htmlspecialchars($item['unit']); ?></span>
                                 </td>
+                                <td class="text-muted"><?php echo (float) ($item['cost_price'] ?? 0) > 0 ? '₱' . number_format($item['cost_price'], 2) : '-'; ?></td>
                                 <td class="fw-bold">₱<?php echo number_format($item['price'], 2); ?></td>
                                 <td>
                                     <span
@@ -216,7 +218,7 @@ if (isset($_SESSION['success_message'])) {
                         <?php endwhile; ?>
                     <?php endif; ?>
                     <tr id="noLiveMatchesRow" style="display: <?php echo $result->num_rows === 0 ? '' : 'none'; ?>;">
-                        <td colspan="7" class="text-center text-muted py-4">
+                        <td colspan="8" class="text-center text-muted py-4">
                             <i class="ph-bold ph-tray fs-1 d-block mb-2"></i>
                             No items found matching the selected filters.
                         </td>

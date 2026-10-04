@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Create Customer Purchase Order';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -92,8 +93,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $iStmt->close();
 
+            // An order saved as Completed updates stock straight away (includes/inventory.php)
+            $stockResult = syncOrderStock($conn, 'customer', $newId);
+            if (!$stockResult['ok']) {
+                throw new Exception(htmlspecialchars($stockResult['error']));
+            }
+
             $conn->commit();
-            $success = "Customer Purchase Order <strong>$po_number</strong> created successfully!";
+            $success = "Customer Purchase Order <strong>" . htmlspecialchars($po_number) . "</strong> created successfully!" . htmlspecialchars(orderStockMessage('customer', $stockResult));
         } catch (Exception $e) {
             $conn->rollback();
             $error = $e->getMessage();

@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Create Supplier Purchase Order';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -19,7 +20,8 @@ while ($s = $suppliersRes->fetch_assoc())
     $suppliers[] = $s;
 
 // Fetch item catalog
-$catalogRes = $conn->query("SELECT id, name, description, unit, price FROM item_list WHERE status = 1 ORDER BY name ASC");
+// Suppliers are paid the cost price (selling price until a cost has been recorded)
+$catalogRes = $conn->query("SELECT id, name, description, unit, IF(cost_price > 0, cost_price, price) AS price FROM item_list WHERE status = 1 ORDER BY name ASC");
 $catalog = [];
 while ($row = $catalogRes->fetch_assoc())
     $catalog[] = $row;
@@ -89,8 +91,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $iStmt->close();
 
+            // An order saved as Completed updates stock straight away (includes/inventory.php)
+            $stockResult = syncOrderStock($conn, 'supplier', $newId);
+            if (!$stockResult['ok']) {
+                throw new Exception(htmlspecialchars($stockResult['error']));
+            }
+
             $conn->commit();
-            $success = "Supplier Purchase Order <strong>$po_number</strong> created successfully!";
+            $success = "Supplier Purchase Order <strong>" . htmlspecialchars($po_number) . "</strong> created successfully!" . htmlspecialchars(orderStockMessage('supplier', $stockResult));
         } catch (Exception $e) {
             $conn->rollback();
             $error = $e->getMessage();

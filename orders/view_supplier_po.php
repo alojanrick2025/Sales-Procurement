@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'View Supplier Purchase Order';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -27,15 +28,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     } else {
         $newStatus = $_POST['status'] ?? $po['status'];
         if (in_array($newStatus, ['pending', 'approved', 'processing', 'completed', 'cancelled'])) {
-            $uStmt = $conn->prepare("UPDATE supplier_orders SET status = ? WHERE id = ?");
-            $uStmt->bind_param("si", $newStatus, $id);
-            if ($uStmt->execute()) {
-                $po['status'] = $newStatus;
-                $success = 'Procurement PO status updated successfully to ' . ucfirst($newStatus) . '.';
-            } else {
-                $error = 'Failed to update order status: ' . $uStmt->error;
+            // Status and stock change together: completing adds/deducts the items,
+            // leaving Completed reverses that (includes/inventory.php)
+            $conn->begin_transaction();
+            try {
+                $uStmt = $conn->prepare("UPDATE supplier_orders SET status = ? WHERE id = ?");
+                $uStmt->bind_param("si", $newStatus, $id);
+                $uStmt->execute();
+                $uStmt->close();
+                $stockResult = syncOrderStock($conn, 'supplier', $id);
+                if ($stockResult['ok']) {
+                    $conn->commit();
+                    $po['status'] = $newStatus;
+                    $success = 'Procurement PO status updated successfully to ' . ucfirst($newStatus) . '.' . orderStockMessage('supplier', $stockResult);
+                } else {
+                    $conn->rollback();
+                    $error = $stockResult['error'];
+                }
+            } catch (Throwable $e) {
+                $conn->rollback();
+                error_log('PO status update failed: ' . $e->getMessage());
+                $error = 'Failed to update order status. Please try again.';
             }
-            $uStmt->close();
         } else {
             $error = 'Invalid order status value.';
         }
@@ -146,6 +160,10 @@ require_once __DIR__ . '/../includes/header.php';
                     ?>
                     <span class="badge <?php echo $badgeClass; ?> fs-6 px-3 py-2 text-uppercase fw-semibold">
                         <?php echo ucfirst($po['status']); ?>
+                    </span>
+                    <span class="d-block small text-muted mt-2">
+                        <i class="ph-bold ph-stack"></i>
+                        <?php echo $po['status'] === 'completed' ? 'Items received into inventory' : 'Items are added to inventory when this order is marked Completed'; ?>
                     </span>
                 </div>
 

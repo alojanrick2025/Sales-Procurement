@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Add New Item';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 require_once __DIR__ . '/../includes/header.php';
 
@@ -13,13 +14,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = trim($_POST['name'] ?? '');
     $unit = strtoupper(trim($_POST['unit'] ?? ''));
     $price = isset($_POST['price']) && $_POST['price'] !== '' ? floatval($_POST['price']) : 100.00;
+    $costPrice = max(0, floatval($_POST['cost_price'] ?? 0));
     $stocks = floatval($_POST['stocks'] ?? 0);
     $status = intval($_POST['status'] ?? 1);
 
     $allowedUnits = ['PCS', 'SET', 'ASS', 'FEET', 'MTR'];
 
     // Validate required fields
-    if (empty($description) || empty($name) || empty($unit)) {
+    if (!validateCsrfToken()) {
+        $error = 'Invalid security token. Please reload the page and try again.';
+    } elseif (empty($description) || empty($name) || empty($unit)) {
         $error = 'Please fill in all required fields (Code, Name, and Unit)';
     } elseif (!in_array($unit, $allowedUnits)) {
         $error = 'Invalid unit. Allowed units are: PCS, SET, ASS, FEET, MTR';
@@ -33,10 +37,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($checkResult->num_rows > 0) {
             $error = 'Item code already exists. Please use a different code.';
         } else {
-            $stmt = $conn->prepare("INSERT INTO item_list (description, name, unit, price, stocks, status) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssddi", $description, $name, $unit, $price, $stocks, $status);
+            // Stock starts at 0; the opening stock is added below so it shows in the stock history
+            $stmt = $conn->prepare("INSERT INTO item_list (description, name, unit, price, cost_price, stocks, status) VALUES (?, ?, ?, ?, ?, 0, ?)");
+            $stmt->bind_param("sssddi", $description, $name, $unit, $price, $costPrice, $status);
 
             if ($stmt->execute()) {
+                if ($stocks > 0) {
+                    adjustStock($conn, $conn->insert_id, 'add', $stocks, 'Opening stock', 'opening');
+                }
                 $success = 'Item added successfully!';
                 // Clear form
                 $_POST = [];
@@ -76,6 +84,7 @@ $conn->close();
 <div class="card">
     <div class="card-body">
         <form method="POST" action="">
+            <?php echo csrfField(); ?>
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Item Code (Description) <span class="text-danger">*</span></label>
@@ -94,7 +103,7 @@ $conn->close();
             </div>
 
             <div class="row">
-                <div class="col-md-4 mb-3">
+                <div class="col-md-3 mb-3">
                     <label class="form-label">Unit <span class="text-danger">*</span></label>
                     <select class="form-select" name="unit" required>
                         <option value="">-- Select Unit --</option>
@@ -112,17 +121,28 @@ $conn->close();
                     <small class="text-muted">Allowed: PCS, SET, ASS, FEET, MTR</small>
                 </div>
 
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Price (₱)</label>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Cost Price (₱)</label>
+                    <div class="input-group">
+                        <span class="input-group-text">₱</span>
+                        <input type="number" step="0.01" class="form-control" name="cost_price"
+                            value="<?php echo htmlspecialchars($_POST['cost_price'] ?? '0.00'); ?>" min="0">
+                    </div>
+                    <small class="text-muted">What you pay the supplier</small>
+                </div>
+
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Selling Price (₱)</label>
                     <div class="input-group">
                         <span class="input-group-text">₱</span>
                         <input type="number" step="0.01" class="form-control" name="price"
                             value="<?php echo htmlspecialchars($_POST['price'] ?? '100.00'); ?>" min="0">
                     </div>
+                    <small class="text-muted">Used in quotations</small>
                 </div>
 
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Stocks</label>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Opening Stock</label>
                     <input type="number" step="0.01" class="form-control" name="stocks"
                         value="<?php echo htmlspecialchars($_POST['stocks'] ?? '0'); ?>" min="0">
                 </div>

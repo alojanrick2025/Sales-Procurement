@@ -1,6 +1,7 @@
 <?php
 $pageTitle = 'Add / Receive Stock';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../includes/inventory.php';
 requireLogin();
 
 $conn = getDBConnection();
@@ -15,30 +16,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $quantity = floatval($_POST['quantity'] ?? 0);
     $remarks = trim($_POST['remarks'] ?? '');
 
-    if ($itemId <= 0 || $quantity <= 0) {
+    if (!validateCsrfToken()) {
+        $error = 'Invalid security token. Please reload the page and try again.';
+    } elseif ($itemId <= 0 || $quantity <= 0) {
         $error = 'Please select a valid item and enter a quantity greater than 0.';
     } else {
-        $checkStmt = $conn->prepare("SELECT id, name, stocks, unit FROM item_list WHERE id = ?");
-        $checkStmt->bind_param("i", $itemId);
-        $checkStmt->execute();
-        $itemResult = $checkStmt->get_result();
-
-        if ($itemResult->num_rows > 0) {
-            $item = $itemResult->fetch_assoc();
-            $newStock = floatval($item['stocks']) + $quantity;
-
-            $updateStmt = $conn->prepare("UPDATE item_list SET stocks = ? WHERE id = ?");
-            $updateStmt->bind_param("di", $newStock, $itemId);
-            if ($updateStmt->execute()) {
-                $success = "Successfully added " . number_format($quantity, 0) . " " . htmlspecialchars($item['unit']) . " to " . htmlspecialchars($item['name']) . ". New total: " . number_format($newStock, 0) . " " . htmlspecialchars($item['unit']) . ".";
-            } else {
-                $error = "Error updating stock: " . $conn->error;
-            }
-            $updateStmt->close();
+        // Recorded in the stock history with the remarks as its note (includes/inventory.php)
+        $result = adjustStock($conn, $itemId, 'add', $quantity, $remarks !== '' ? $remarks : 'Stock received');
+        if ($result['ok']) {
+            $unitStmt = $conn->prepare("SELECT unit FROM item_list WHERE id = ?");
+            $unitStmt->bind_param("i", $itemId);
+            $unitStmt->execute();
+            $unit = $unitStmt->get_result()->fetch_assoc()['unit'] ?? '';
+            $unitStmt->close();
+            $name = html_entity_decode(str_ireplace('&quot;', '"', $result['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $success = "Successfully added " . number_format($quantity, 0) . " " . $unit . " to " . $name . ". New total: " . number_format($result['balance'], 0) . " " . $unit . ".";
         } else {
-            $error = 'Item not found.';
+            $error = $result['error'];
         }
-        $checkStmt->close();
     }
 }
 
@@ -76,6 +71,7 @@ require_once __DIR__ . '/../includes/header.php';
 <div class="card shadow-sm">
     <div class="card-body p-4">
         <form method="POST" action="">
+            <?php echo csrfField(); ?>
             <div class="mb-3">
                 <label for="item_id" class="form-label">Select Item <span class="text-danger">*</span></label>
                 <select class="form-select" name="item_id" id="item_id" required>

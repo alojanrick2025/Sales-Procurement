@@ -350,7 +350,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 5);
+define('SCHEMA_VERSION', 6);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -386,6 +386,11 @@ function migrateSchema($conn) {
         ['quotations', 'markup_amount', 'DECIMAL(12,2) DEFAULT 0.00'],
         ['quotations', 'sop_amount', 'DECIMAL(12,2) DEFAULT 0.00'],
         ['quotation_items', 'markup_rate', 'DECIMAL(5,2) DEFAULT 0.00'],
+        // Inventory (includes/inventory.php): purchase cost per item, and whether a
+        // purchase order's items are currently counted in stock
+        ['item_list', 'cost_price', 'DECIMAL(12,2) NOT NULL DEFAULT 0.00'],
+        ['supplier_orders', 'stock_applied', 'TINYINT(1) NOT NULL DEFAULT 0'],
+        ['customer_orders', 'stock_applied', 'TINYINT(1) NOT NULL DEFAULT 0'],
     ];
     $check = $conn->prepare("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     foreach ($columns as [$table, $column, $definition]) {
@@ -394,6 +399,11 @@ function migrateSchema($conn) {
         if ((int) $check->get_result()->fetch_assoc()['n'] === 0) {
             try {
                 $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+                // Orders completed before stock tracking existed are taken as already
+                // counted (stock was kept up to date by hand), so they are not added again
+                if ($column === 'stock_applied') {
+                    $conn->query("UPDATE `$table` SET stock_applied = 1 WHERE status = 'completed'");
+                }
             } catch (mysqli_sql_exception $e) {
                 if ($e->getCode() !== 1060) { // 1060 = another request already added it
                     throw $e;
@@ -402,6 +412,25 @@ function migrateSchema($conn) {
         }
     }
     $check->close();
+
+    // Stock history: one row per change to an item's stock
+    $conn->query("CREATE TABLE IF NOT EXISTS stock_movements (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        item_id INT NOT NULL,
+        item_name VARCHAR(255) NOT NULL,
+        quantity_change DECIMAL(12,2) NOT NULL,
+        balance_after DECIMAL(12,2) NOT NULL,
+        movement_type VARCHAR(20) NOT NULL,
+        reference_type VARCHAR(20) DEFAULT NULL,
+        reference_id INT DEFAULT NULL,
+        reference_number VARCHAR(50) DEFAULT NULL,
+        note VARCHAR(255) DEFAULT NULL,
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_item (item_id, created_at),
+        KEY idx_reference (reference_type, reference_id),
+        KEY idx_created_at (created_at)
+    )");
 
     // Indexes for the columns the list pages, dashboard and reports filter and sort on
     $indexes = [
