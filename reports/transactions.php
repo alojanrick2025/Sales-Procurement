@@ -10,74 +10,10 @@ $typeFilter = trim($_GET['type'] ?? '');
 $statusFilter = trim($_GET['status'] ?? '');
 $search = trim($_GET['search'] ?? '');
 
-// Build unified query
-$sql = "
-SELECT 
-    'Quotation' AS transaction_type,
-    quotation_number AS ref_number,
-    client_name AS party_name,
-    DATE(created_at) AS trans_date,
-    created_at AS trans_datetime,
-    grand_total AS amount,
-    CASE 
-        WHEN status = 'accepted' THEN 'approved'
-        WHEN status IN ('draft', 'sent') THEN 'pending'
-        WHEN status = 'rejected' THEN 'cancelled'
-        ELSE status
-    END AS status,
-    CONCAT('/quotation/view_quotation.php?id=', id) AS view_link
-FROM quotations
+require_once __DIR__ . '/../includes/reports.php';
+$sql = transactionsUnionSql();
 
-UNION ALL
-
-SELECT 
-    'Customer Purchase Order' AS transaction_type,
-    po_number AS ref_number,
-    customer_name AS party_name,
-    order_date AS trans_date,
-    created_at AS trans_datetime,
-    total_amount AS amount,
-    status,
-    CONCAT('/orders/view_customer_po.php?id=', id) AS view_link
-FROM customer_orders
-
-UNION ALL
-
-SELECT 
-    'Supplier Purchase Order' AS transaction_type,
-    po_number AS ref_number,
-    supplier_name AS party_name,
-    order_date AS trans_date,
-    created_at AS trans_datetime,
-    total_amount AS amount,
-    status,
-    CONCAT('/orders/view_supplier_po.php?id=', id) AS view_link
-FROM supplier_orders
-";
-
-$where = " WHERE 1=1";
-$params = [];
-$types = '';
-
-if (!empty($typeFilter)) {
-    $where .= " AND transaction_type = ?";
-    $params[] = $typeFilter;
-    $types .= 's';
-}
-
-if (!empty($statusFilter)) {
-    $where .= " AND status = ?";
-    $params[] = $statusFilter;
-    $types .= 's';
-}
-
-if (!empty($search)) {
-    $where .= " AND (ref_number LIKE ? OR party_name LIKE ?)";
-    $sParam = "%$search%";
-    $params[] = $sParam;
-    $params[] = $sParam;
-    $types .= 'ss';
-}
+[$where, $types, $params] = transactionsFilter($typeFilter, $statusFilter, $search);
 
 // Pagination
 require_once __DIR__ . '/../includes/pagination.php';
@@ -102,9 +38,14 @@ $transactions = $stmt->get_result();
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="ph-bold ph-clock-counter-clockwise"></i> Complete Transaction History</h2>
-    <a href="/admin/index.php" class="btn btn-secondary">
-        <i class="ph-bold ph-arrow-left"></i> Back to Dashboard
-    </a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="/reports/export.php?<?php echo htmlspecialchars(http_build_query(['type' => 'transactions', 'type_filter' => $typeFilter, 'status' => $statusFilter, 'search' => $search])); ?>" class="btn btn-outline-dark">
+            <i class="ph-bold ph-file-csv"></i> Export CSV
+        </a>
+        <a href="/admin/index.php" class="btn btn-secondary">
+            <i class="ph-bold ph-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
 </div>
 
 <!-- Filters -->

@@ -52,9 +52,14 @@ if (isset($_SESSION['success_message'])) {
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="ph-bold ph-archive"></i> Item Inventory</h2>
-    <a href="/items/add_item.php" class="btn btn-primary">
-        <i class="ph-bold ph-plus-circle"></i> Add New Item
-    </a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="/reports/export.php?type=inventory" class="btn btn-outline-dark">
+            <i class="ph-bold ph-file-csv"></i> Export CSV
+        </a>
+        <a href="/items/add_item.php" class="btn btn-primary">
+            <i class="ph-bold ph-plus-circle"></i> Add New Item
+        </a>
+    </div>
 </div>
 
 <?php if (!empty($flashSuccess)): ?>

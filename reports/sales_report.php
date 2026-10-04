@@ -40,9 +40,14 @@ $recentOrders = $conn->query("
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="ph-bold ph-chart-line-up"></i> Sales Reports</h2>
-    <a href="/admin/index.php" class="btn btn-secondary">
-        <i class="ph-bold ph-arrow-left"></i> Back to Dashboard
-    </a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="/reports/export.php?type=customer_orders" class="btn btn-outline-dark">
+            <i class="ph-bold ph-file-csv"></i> Export CSV
+        </a>
+        <a href="/admin/index.php" class="btn btn-secondary">
+            <i class="ph-bold ph-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
 </div>
 
 <!-- KPI Summary Cards -->

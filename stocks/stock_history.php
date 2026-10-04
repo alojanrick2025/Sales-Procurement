@@ -86,9 +86,14 @@ $referenceLinks = [
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h2 class="mb-0"><i class="ph-bold ph-clock-counter-clockwise"></i> Stock History</h2>
-    <a href="/stocks/stocks.php" class="btn btn-secondary">
-        <i class="ph-bold ph-arrow-left"></i> Back to Stock Management
-    </a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="/reports/export.php?<?php echo htmlspecialchars(http_build_query(['type' => 'stock_history', 'item_id' => $itemFilter ?: '', 'type_filter' => $typeFilter, 'from' => $dateFrom, 'to' => $dateTo])); ?>" class="btn btn-outline-dark">
+            <i class="ph-bold ph-file-csv"></i> Export CSV
+        </a>
+        <a href="/stocks/stocks.php" class="btn btn-secondary">
+            <i class="ph-bold ph-arrow-left"></i> Back to Stock Management
+        </a>
+    </div>
 </div>
 
 <?php if ($selectedItem): ?>

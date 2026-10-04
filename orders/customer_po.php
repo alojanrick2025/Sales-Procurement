@@ -40,9 +40,14 @@ $result = $stmt->get_result();
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="ph-bold ph-receipt"></i> Customer Purchase Orders</h2>
-    <a href="/orders/add_customer_po.php" class="btn btn-primary">
-        <i class="ph-bold ph-plus-circle"></i> New Customer PO
-    </a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="/reports/export.php?type=customer_orders" class="btn btn-outline-dark">
+            <i class="ph-bold ph-file-csv"></i> Export CSV
+        </a>
+        <a href="/orders/add_customer_po.php" class="btn btn-primary">
+            <i class="ph-bold ph-plus-circle"></i> New Customer PO
+        </a>
+    </div>
 </div>
 
 <!-- Search and Filter Bar (Live Real-Time) -->

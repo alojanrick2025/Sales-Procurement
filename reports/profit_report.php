@@ -2,6 +2,7 @@
 $pageTitle = 'Profit Report';
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/pagination.php';
+require_once __DIR__ . '/../includes/reports.php';
 requireLogin();
 require_once __DIR__ . '/../includes/header.php';
 
@@ -19,19 +20,8 @@ $isDate = function ($value) {
 $from = $isDate($_GET['from'] ?? '') ? $_GET['from'] : date('Y-01-01');
 $to = $isDate($_GET['to'] ?? '') ? $_GET['to'] : date('Y-m-d');
 $basis = ($_GET['basis'] ?? '') === 'all' ? 'all' : 'completed';
-$statusCondition = $basis === 'all' ? "o.status != 'cancelled'" : "o.status = 'completed'";
-
-$lines = "SELECT o.id AS order_id, o.po_number, o.order_date, o.customer_name, oi.total_price AS revenue,
-        oi.quantity * COALESCE(NULLIF(oi.unit_cost, 0), NULLIF(il.cost_price, 0)) AS cost
-    FROM customer_orders o
-    JOIN customer_order_items oi ON oi.customer_order_id = o.id
-    LEFT JOIN item_list il ON il.id = oi.item_id
-    WHERE o.order_date BETWEEN ? AND ? AND $statusCondition";
-$sums = "COUNT(DISTINCT order_id) AS orders,
-    COALESCE(SUM(revenue), 0) AS revenue,
-    COALESCE(SUM(cost), 0) AS cost,
-    COALESCE(SUM(CASE WHEN cost IS NOT NULL THEN revenue END), 0) AS costed_revenue,
-    COALESCE(SUM(CASE WHEN cost IS NULL THEN revenue END), 0) AS uncosted_revenue";
+$lines = profitLinesSql($basis);
+$sums = PROFIT_SUMS;
 
 function profitQuery($conn, $sql, $from, $to, $extraTypes = '', $extraParams = []) {
     $stmt = $conn->prepare($sql);
@@ -40,13 +30,6 @@ function profitQuery($conn, $sql, $from, $to, $extraTypes = '', $extraParams = [
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
     return $rows;
-}
-
-// Profit and margin from a row of sums (profit only on lines with a cost price)
-function profitFigures($row) {
-    $profit = (float) $row['costed_revenue'] - (float) $row['cost'];
-    $margin = (float) $row['costed_revenue'] > 0 ? $profit / (float) $row['costed_revenue'] * 100 : null;
-    return [$profit, $margin];
 }
 
 $totals = profitQuery($conn, "SELECT $sums FROM ($lines) l", $from, $to)[0];
@@ -72,6 +55,13 @@ $profitClass = function ($profit) {
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h2 class="mb-0"><i class="ph-bold ph-coins"></i> Profit Report</h2>
+    <div class="d-flex flex-wrap gap-2">
+        <?php foreach (['month' => 'By Month', 'customer' => 'By Customer', 'order' => 'By Order'] as $group => $label): ?>
+            <a href="/reports/export.php?<?php echo htmlspecialchars(http_build_query(['type' => 'profit', 'group' => $group, 'from' => $from, 'to' => $to, 'basis' => $basis])); ?>" class="btn btn-outline-dark btn-sm">
+                <i class="ph-bold ph-file-csv"></i> <?php echo $label; ?> CSV
+            </a>
+        <?php endforeach; ?>
+    </div>
 </div>
 
 <!-- Filters -->
