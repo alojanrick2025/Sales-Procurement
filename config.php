@@ -350,7 +350,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 2);
+define('SCHEMA_VERSION', 3);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -430,6 +430,28 @@ function migrateSchema($conn) {
         }
     }
     $check->close();
+
+    // Remove the sample purchase orders the first setup loaded: they carry a total but
+    // no line items. A PO is removed only if its number, total and notes all match a
+    // sample and it has no line items, so real orders are never touched.
+    $samplePOs = [
+        ['customer_orders', 'customer_order_items', 'customer_order_id', 'CPO-2026-0001', '50400.00', 'PO for HDG Bolts and Machine Assemblies'],
+        ['customer_orders', 'customer_order_items', 'customer_order_id', 'CPO-2026-0002', '35000.00', 'Tower grounding and hardware installation package'],
+        ['customer_orders', 'customer_order_items', 'customer_order_id', 'CPO-2026-0003', '42500.00', 'Flange bolts, machine bolts and hardware accessories'],
+        ['customer_orders', 'customer_order_items', 'customer_order_id', 'CPO-2026-0004', '18750.00', 'Awaiting municipal council approval signature'],
+        ['customer_orders', 'customer_order_items', 'customer_order_id', 'CPO-2026-0005', '12000.00', 'Client requested project cancellation due to revised specs'],
+        ['supplier_orders', 'supplier_order_items', 'supplier_order_id', 'SPO-2026-0001', '28500.00', 'HDG Round Bars and structural bolts restock'],
+        ['supplier_orders', 'supplier_order_items', 'supplier_order_id', 'SPO-2026-0002', '19800.00', 'Machine bolts and carriage bolts batch replenish'],
+        ['supplier_orders', 'supplier_order_items', 'supplier_order_id', 'SPO-2026-0003', '8400.00', 'Procurement of specialized eye nuts and lag screws'],
+        ['supplier_orders', 'supplier_order_items', 'supplier_order_id', 'SPO-2026-0004', '15200.00', 'Duplicate procurement order cancelled'],
+    ];
+    foreach ($samplePOs as [$table, $itemsTable, $foreignKey, $poNumber, $total, $notes]) {
+        $stmt = $conn->prepare("DELETE FROM `$table` WHERE po_number = ? AND total_amount = ? AND notes = ?
+            AND NOT EXISTS (SELECT 1 FROM `$itemsTable` WHERE `$itemsTable`.`$foreignKey` = `$table`.id)");
+        $stmt->bind_param("sss", $poNumber, $total, $notes);
+        $stmt->execute();
+        $stmt->close();
+    }
 
     $version = (string) SCHEMA_VERSION;
     $stmt = $conn->prepare("INSERT INTO system_info (meta_field, meta_value) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");

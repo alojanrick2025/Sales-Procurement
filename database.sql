@@ -82,7 +82,6 @@ CREATE TABLE `customer_orders` (
 
 LOCK TABLES `customer_orders` WRITE;
 /*!40000 ALTER TABLE `customer_orders` DISABLE KEYS */;
-INSERT INTO `customer_orders` VALUES (1,'CPO-2026-0001',1,1,'BRICOLAGE PHILIPPINES INC.','2026-09-12',50400.00,'processing','PO for HDG Bolts and Machine Assemblies','2026-09-13 18:43:39','2026-09-13 18:43:39'),(2,'CPO-2026-0002',2,3,'MUNICIPALITY OF CALATRAVA','2026-09-10',35000.00,'completed','Tower grounding and hardware installation package','2026-09-13 18:43:39','2026-09-13 19:07:21'),(3,'CPO-2026-0003',NULL,4,'SILAY CITY WATER DISTRICT','2026-09-08',42500.00,'completed','Flange bolts, machine bolts and hardware accessories','2026-09-13 18:43:39','2026-09-13 18:43:39'),(4,'CPO-2026-0004',NULL,3,'MUNICIPALITY OF CALATRAVA','2026-09-13',18750.00,'pending','Awaiting municipal council approval signature','2026-09-13 18:43:39','2026-09-13 18:43:39'),(5,'CPO-2026-0005',NULL,5,'Sagay City Water District','2026-09-05',12000.00,'cancelled','Client requested project cancellation due to revised specs','2026-09-13 18:43:39','2026-09-13 18:43:39');
 /*!40000 ALTER TABLE `customer_orders` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -260,7 +259,6 @@ CREATE TABLE `supplier_orders` (
 
 LOCK TABLES `supplier_orders` WRITE;
 /*!40000 ALTER TABLE `supplier_orders` DISABLE KEYS */;
-INSERT INTO `supplier_orders` VALUES (1,'SPO-2026-0001',2,'FRONTIER TOWER ASSOCIATES PHILIPPINES','2026-09-11',28500.00,'completed','HDG Round Bars and structural bolts restock','2026-09-13 18:43:39','2026-09-13 19:07:21'),(2,'SPO-2026-0002',6,'ISON TOWER','2026-09-12',19800.00,'processing','Machine bolts and carriage bolts batch replenish','2026-09-13 18:43:39','2026-09-13 19:07:21'),(3,'SPO-2026-0003',2,'FRONTIER TOWER ASSOCIATES PHILIPPINES','2026-09-13',8400.00,'pending','Procurement of specialized eye nuts and lag screws','2026-09-13 18:43:39','2026-09-13 19:07:21'),(4,'SPO-2026-0004',6,'ISON TOWER','2026-09-06',15200.00,'cancelled','Duplicate procurement order cancelled','2026-09-13 18:43:39','2026-09-13 19:07:21');
 /*!40000 ALTER TABLE `supplier_orders` ENABLE KEYS */;
 UNLOCK TABLES;
 
