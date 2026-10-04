@@ -189,7 +189,7 @@ if (isset($_SESSION['success_message'])) {
                                 <td class="fw-bold">₱<?php echo number_format($item['price'], 2); ?></td>
                                 <td>
                                     <span
-                                        class="badge bg-<?php echo $item['stocks'] > 10 ? 'success' : ($item['stocks'] > 0 ? 'warning' : 'danger'); ?>">
+                                        class="badge bg-<?php echo $item['stocks'] > $item['reorder_level'] ? 'success' : ($item['stocks'] > 0 ? 'warning' : 'danger'); ?>">
                                         <?php echo number_format($item['stocks'], 0); ?>
                                         <?php echo htmlspecialchars($item['unit']); ?>
                                     </span>

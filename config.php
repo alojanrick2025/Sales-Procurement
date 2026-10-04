@@ -350,7 +350,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 6);
+define('SCHEMA_VERSION', 7);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -391,6 +391,8 @@ function migrateSchema($conn) {
         ['item_list', 'cost_price', 'DECIMAL(12,2) NOT NULL DEFAULT 0.00'],
         ['supplier_orders', 'stock_applied', 'TINYINT(1) NOT NULL DEFAULT 0'],
         ['customer_orders', 'stock_applied', 'TINYINT(1) NOT NULL DEFAULT 0'],
+        // Low-stock alerts: an item is low when its stock is at or below this level
+        ['item_list', 'reorder_level', 'DECIMAL(12,2) NOT NULL DEFAULT 10.00'],
     ];
     $check = $conn->prepare("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     foreach ($columns as [$table, $column, $definition]) {

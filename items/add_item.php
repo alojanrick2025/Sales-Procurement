@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $unit = strtoupper(trim($_POST['unit'] ?? ''));
     $price = isset($_POST['price']) && $_POST['price'] !== '' ? floatval($_POST['price']) : 100.00;
     $costPrice = max(0, floatval($_POST['cost_price'] ?? 0));
+    $reorderLevel = max(0, floatval($_POST['reorder_level'] ?? 10));
     $stocks = floatval($_POST['stocks'] ?? 0);
     $status = intval($_POST['status'] ?? 1);
 
@@ -38,8 +39,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Item code already exists. Please use a different code.';
         } else {
             // Stock starts at 0; the opening stock is added below so it shows in the stock history
-            $stmt = $conn->prepare("INSERT INTO item_list (description, name, unit, price, cost_price, stocks, status) VALUES (?, ?, ?, ?, ?, 0, ?)");
-            $stmt->bind_param("sssddi", $description, $name, $unit, $price, $costPrice, $status);
+            $stmt = $conn->prepare("INSERT INTO item_list (description, name, unit, price, cost_price, reorder_level, stocks, status) VALUES (?, ?, ?, ?, ?, ?, 0, ?)");
+            $stmt->bind_param("sssdddi", $description, $name, $unit, $price, $costPrice, $reorderLevel, $status);
 
             if ($stmt->execute()) {
                 if ($stocks > 0) {
@@ -157,6 +158,12 @@ $conn->close();
                         <option value="0" <?php echo ($_POST['status'] ?? '') == '0' ? 'selected' : ''; ?>>Inactive
                         </option>
                     </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Reorder Level</label>
+                    <input type="number" step="any" min="0" class="form-control" name="reorder_level"
+                        value="<?php echo htmlspecialchars($_POST['reorder_level'] ?? '10'); ?>">
+                    <small class="text-muted">Shown as low stock on the dashboard at or below this quantity</small>
                 </div>
             </div>
 

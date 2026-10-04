@@ -91,6 +91,16 @@ LIMIT 10;
 
 $recentTransactions = $conn->query($recentTransSql);
 
+// Low-stock alert: active items at or below their reorder level, biggest shortfall first.
+// Suggested order: enough to bring the item up to twice its reorder level.
+$lowStockCount = (int) $conn->query("SELECT COUNT(*) AS n FROM item_list WHERE status = 1 AND stocks <= reorder_level")->fetch_assoc()['n'];
+$lowStockItems = $conn->query("
+    SELECT id, name, description, unit, stocks, reorder_level,
+           GREATEST(1, CEIL(reorder_level * 2 - stocks)) AS suggested_qty
+    FROM item_list WHERE status = 1 AND stocks <= reorder_level
+    ORDER BY (stocks - reorder_level) ASC, TRIM(name) ASC LIMIT 10
+")->fetch_all(MYSQLI_ASSOC);
+
 $conn->close();
 ?>
 
@@ -232,6 +242,75 @@ $conn->close();
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Low-stock alert -->
+<div class="card shadow-sm border mb-4">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom py-3">
+        <h5 class="mb-0 fw-bold" style="color: #16231D;">
+            <i class="ph-bold ph-warning-circle me-1 <?php echo $lowStockCount ? 'text-danger' : 'text-success'; ?>"></i> Low Stock
+            <?php if ($lowStockCount): ?><span class="badge bg-danger ms-1"><?php echo $lowStockCount; ?></span><?php endif; ?>
+        </h5>
+        <a href="/stocks/stocks.php" class="btn btn-sm btn-outline-dark"><i class="ph-bold ph-stack"></i> Stock Management</a>
+    </div>
+    <div class="card-body p-0">
+        <?php if (!$lowStockItems): ?>
+            <div class="text-center text-muted py-4"><i class="ph-bold ph-check-circle text-success"></i> All active items are above their reorder level.</div>
+        <?php else: ?>
+            <form method="GET" action="/orders/add_supplier_po.php">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px;"><input type="checkbox" class="form-check-input" id="restockAll" checked title="Select all" aria-label="Select all"></th>
+                                <th>Item</th>
+                                <th>Code</th>
+                                <th class="text-end">In Stock</th>
+                                <th class="text-end">Reorder Level</th>
+                                <th class="text-end">Suggested Order</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($lowStockItems as $low):
+                                $lowName = html_entity_decode(str_ireplace('&quot;', '"', $low['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                                ?>
+                                <tr>
+                                    <td><input type="checkbox" class="form-check-input restock-check" name="restock[]" value="<?php echo (int) $low['id']; ?>" checked aria-label="Order <?php echo htmlspecialchars($lowName); ?>"></td>
+                                    <td><a href="/stocks/stock_history.php?item_id=<?php echo (int) $low['id']; ?>" class="text-decoration-none text-dark fw-semibold"><?php echo htmlspecialchars($lowName); ?></a></td>
+                                    <td class="text-muted small"><?php echo htmlspecialchars($low['description']); ?></td>
+                                    <td class="text-end fw-bold <?php echo (float) $low['stocks'] <= 0 ? 'text-danger' : 'text-warning'; ?>"><?php echo number_format((float) $low['stocks'], 0); ?> <?php echo htmlspecialchars($low['unit']); ?></td>
+                                    <td class="text-end"><?php echo number_format((float) $low['reorder_level'], 0); ?></td>
+                                    <td class="text-end"><?php echo number_format((float) $low['suggested_qty'], 0); ?> <?php echo htmlspecialchars($low['unit']); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 p-3 border-top">
+                    <span class="small text-muted">
+                        <?php echo $lowStockCount > count($lowStockItems) ? 'Showing the ' . count($lowStockItems) . ' lowest of ' . $lowStockCount . ' items. ' : ''; ?>Suggested order brings stock up to twice the reorder level.
+                    </span>
+                    <button type="submit" class="btn btn-primary btn-sm" id="restockBtn"><i class="ph-bold ph-shopping-cart"></i> Create Supplier PO for Selected</button>
+                </div>
+            </form>
+            <script>
+                (function () {
+                    const all = document.getElementById('restockAll');
+                    const checks = document.querySelectorAll('.restock-check');
+                    const btn = document.getElementById('restockBtn');
+                    const update = function () {
+                        btn.disabled = !Array.from(checks).some(c => c.checked);
+                        all.checked = Array.from(checks).every(c => c.checked);
+                    };
+                    all.addEventListener('change', function () {
+                        checks.forEach(c => { c.checked = all.checked; });
+                        update();
+                    });
+                    checks.forEach(c => c.addEventListener('change', update));
+                })();
+            </script>
+        <?php endif; ?>
     </div>
 </div>
 

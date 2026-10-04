@@ -33,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $unit = strtoupper(trim($_POST['unit'] ?? ''));
     $price = isset($_POST['price']) && $_POST['price'] !== '' ? floatval($_POST['price']) : 100.00;
     $costPrice = max(0, floatval($_POST['cost_price'] ?? 0));
+    $reorderLevel = max(0, floatval($_POST['reorder_level'] ?? 10));
     $stocks = floatval($_POST['stocks'] ?? 0);
     $status = intval($_POST['status'] ?? 1);
 
@@ -55,8 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($checkResult->num_rows > 0) {
             $error = 'Item code already exists. Please use a different code.';
         } else {
-            $stmt = $conn->prepare("UPDATE item_list SET description = ?, name = ?, unit = ?, price = ?, cost_price = ?, status = ? WHERE id = ?");
-            $stmt->bind_param("sssddii", $description, $name, $unit, $price, $costPrice, $status, $id);
+            $stmt = $conn->prepare("UPDATE item_list SET description = ?, name = ?, unit = ?, price = ?, cost_price = ?, reorder_level = ?, status = ? WHERE id = ?");
+            $stmt->bind_param("sssdddii", $description, $name, $unit, $price, $costPrice, $reorderLevel, $status, $id);
 
             if ($stmt->execute()) {
                 // A changed stock count is recorded in the stock history
@@ -184,6 +185,12 @@ require_once __DIR__ . '/../includes/header.php';
                         <option value="1" <?php echo $item['status'] == 1 ? 'selected' : ''; ?>>Active</option>
                         <option value="0" <?php echo $item['status'] == 0 ? 'selected' : ''; ?>>Inactive</option>
                     </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Reorder Level</label>
+                    <input type="number" step="any" min="0" class="form-control" name="reorder_level"
+                        value="<?php echo htmlspecialchars($item['reorder_level'] ?? '10'); ?>">
+                    <small class="text-muted">Shown as low stock on the dashboard at or below this quantity</small>
                 </div>
             </div>
 

@@ -43,8 +43,8 @@ $allowedUnits = ['PCS', 'SET', 'ASS', 'FEET', 'MTR'];
 // KPI statistics (one query)
 $stockStats = $conn->query("
     SELECT COUNT(*) as total,
-           COUNT(CASE WHEN stocks > 10 THEN 1 END) as in_stock,
-           COUNT(CASE WHEN stocks > 0 AND stocks <= 10 THEN 1 END) as low_stock,
+           COUNT(CASE WHEN stocks > reorder_level THEN 1 END) as in_stock,
+           COUNT(CASE WHEN stocks > 0 AND stocks <= reorder_level THEN 1 END) as low_stock,
            COUNT(CASE WHEN stocks <= 0 THEN 1 END) as out_of_stock
     FROM item_list
 ")->fetch_assoc();
@@ -137,7 +137,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h6 class="card-subtitle mb-2 small" style="color: rgba(215, 255, 224, 0.7);">In Stock (&gt; 10)
+                        <h6 class="card-subtitle mb-2 small" style="color: rgba(215, 255, 224, 0.7);">In Stock (above reorder level)
                         </h6>
                         <h2 class="mb-0" style="color: var(--ghost-green);"><?php echo number_format($inStockCount); ?>
                         </h2>
@@ -153,7 +153,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h6 class="card-subtitle mb-2 small" style="color: #fcd34d;">Low Stock (&le; 10)</h6>
+                        <h6 class="card-subtitle mb-2 small" style="color: #fcd34d;">Low Stock (at or below reorder level)</h6>
                         <h2 class="mb-0" style="color: #fbbf24;"><?php echo number_format($lowStockCount); ?></h2>
                     </div>
                     <i class="ph-bold ph-warning fs-1" style="color: #fbbf24;"></i>
@@ -206,8 +206,8 @@ require_once __DIR__ . '/../includes/header.php';
                 <label class="form-label small fw-semibold text-muted">Stock Level</label>
                 <select class="form-select" id="stockStatusSelect">
                     <option value="">All Stock Levels</option>
-                    <option value="in_stock">In Stock (&gt; 10)</option>
-                    <option value="low_stock">Low Stock (&le; 10)</option>
+                    <option value="in_stock">In Stock (above reorder level)</option>
+                    <option value="low_stock">Low Stock (at or below reorder level)</option>
                     <option value="out_of_stock">Out of Stock (0)</option>
                 </select>
             </div>
@@ -293,7 +293,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 $badgeClass = 'bg-danger';
                                 $statusText = 'Out of Stock';
                                 $stockLevelKey = 'out_of_stock';
-                            } elseif ($stockQty <= 10) {
+                            } elseif ($stockQty <= (float) $item['reorder_level']) {
                                 $badgeClass = 'bg-warning text-dark';
                                 $statusText = 'Low Stock';
                                 $stockLevelKey = 'low_stock';

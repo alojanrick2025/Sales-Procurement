@@ -177,6 +177,23 @@ if ($editing) {
             'quantity' => (float) $it['quantity'], 'unit_price' => (float) $it['unit_price'], 'markdown' => (float) ($it['markdown_rate'] ?? 0)];
     }
 }
+// From the dashboard's low-stock list (?restock[]=id): one row per item, suggested
+// quantity brings stock up to twice the reorder level, priced at the item's cost
+$restockIds = array_values(array_filter(array_map('intval', (array) ($_GET['restock'] ?? []))));
+if (!$editing && $_SERVER['REQUEST_METHOD'] !== 'POST' && $restockIds) {
+    $placeholders = implode(',', array_fill(0, count($restockIds), '?'));
+    $stmt = $conn->prepare("SELECT id, name, description, unit, IF(cost_price > 0, cost_price, price) AS price,
+            GREATEST(1, CEIL(reorder_level * 2 - stocks)) AS suggested_qty
+        FROM item_list WHERE id IN ($placeholders) ORDER BY TRIM(name)");
+    $stmt->bind_param(str_repeat('i', count($restockIds)), ...$restockIds);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $it) {
+        $formItems[] = ['item_id' => (int) $it['id'], 'item_name' => html_entity_decode(str_ireplace('&quot;', '"', $it['name']), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            'description' => $it['description'], 'unit' => $it['unit'], 'quantity' => (float) $it['suggested_qty'], 'unit_price' => (float) $it['price'], 'markdown' => 0];
+    }
+    $stmt->close();
+    $form['notes'] = 'Restock of low-stock items';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error) {
     $form = [
         'po_number' => $po_number,
