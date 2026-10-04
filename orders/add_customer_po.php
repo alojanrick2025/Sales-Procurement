@@ -108,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn->begin_transaction();
         try {
             $reverseResult = null;
+            $savedCosts = [];
             if ($editing) {
                 // Stock: an order that stays Completed with the same items is left alone.
                 // Otherwise its current items come out of stock here and the edited items
@@ -131,6 +132,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param("siisssdssi", $po_number, $quotation_id, $customer_id, $customer_name, $order_date, $due_date, $grand_total, $status, $notes, $editId);
                 $stmt->execute();
                 $stmt->close();
+                // Keep the cost each item had when first sold (profit report)
+                $stmt = $conn->prepare("SELECT item_id, unit_cost FROM customer_order_items WHERE customer_order_id = ? AND item_id IS NOT NULL AND unit_cost IS NOT NULL");
+                $stmt->bind_param("i", $editId);
+                $stmt->execute();
+                foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+                    $savedCosts[(int) $row['item_id']] = (float) $row['unit_cost'];
+                }
+                $stmt->close();
                 $stmt = $conn->prepare("DELETE FROM customer_order_items WHERE customer_order_id = ?");
                 $stmt->bind_param("i", $editId);
                 $stmt->execute();
@@ -145,13 +154,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->close();
             }
 
-            $iStmt = $conn->prepare("INSERT INTO customer_order_items (customer_order_id, item_id, item_name, description, unit, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            // Each line records the item's cost price at the time of sale (profit report)
+            $costStmt = $conn->prepare("SELECT cost_price FROM item_list WHERE id = ?");
+            $iStmt = $conn->prepare("INSERT INTO customer_order_items (customer_order_id, item_id, item_name, description, unit, quantity, unit_price, unit_cost, total_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
             foreach ($validItems as $item) {
-                $iStmt->bind_param("iisssddd", $newId, $item['item_id'], $item['item_name'], $item['description'], $item['unit'], $item['quantity'], $item['unit_price'], $item['total_price']);
+                $unitCost = null;
+                if ($item['item_id']) {
+                    if (isset($savedCosts[$item['item_id']])) {
+                        $unitCost = $savedCosts[$item['item_id']];
+                    } else {
+                        $costStmt->bind_param("i", $item['item_id']);
+                        $costStmt->execute();
+                        $cost = (float) ($costStmt->get_result()->fetch_assoc()['cost_price'] ?? 0);
+                        $unitCost = $cost > 0 ? $cost : null;
+                    }
+                }
+                $iStmt->bind_param("iisssdddd", $newId, $item['item_id'], $item['item_name'], $item['description'], $item['unit'], $item['quantity'], $item['unit_price'], $unitCost, $item['total_price']);
                 if (!$iStmt->execute())
                     throw new Exception("Error saving item: " . $iStmt->error);
             }
             $iStmt->close();
+            $costStmt->close();
 
             // An order saved as Completed updates stock straight away (includes/inventory.php)
             $stockResult = syncOrderStock($conn, 'customer', $newId);

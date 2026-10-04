@@ -205,6 +205,11 @@ function getHeaderAvatarHtml($user, $sysLogo = '') {
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'profit_report.php' ? 'active' : ''; ?>" href="/reports/profit_report.php">
+                                <i class="ph-bold ph-coins"></i> Profit Report
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'transactions.php' ? 'active' : ''; ?>" href="/reports/transactions.php">
                                 <i class="ph-bold ph-clock-counter-clockwise"></i> Transaction History
                             </a>

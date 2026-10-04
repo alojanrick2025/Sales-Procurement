@@ -353,7 +353,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 8);
+define('SCHEMA_VERSION', 9);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -399,6 +399,8 @@ function migrateSchema($conn) {
         // Payments (includes/payments.php): when each order should be paid
         ['customer_orders', 'due_date', 'DATE DEFAULT NULL'],
         ['supplier_orders', 'due_date', 'DATE DEFAULT NULL'],
+        // Profit report: the item's cost price when it was sold (NULL on older orders)
+        ['customer_order_items', 'unit_cost', 'DECIMAL(12,2) DEFAULT NULL'],
     ];
     $check = $conn->prepare("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     foreach ($columns as [$table, $column, $definition]) {
