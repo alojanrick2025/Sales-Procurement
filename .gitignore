@@ -1,6 +1,3 @@
 # Local secrets - never commit
 .env
 .env.local
-
-# Composer packages (installed by "composer install"; the Docker build does this)
-/vendor/
