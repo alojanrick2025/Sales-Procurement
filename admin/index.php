@@ -104,9 +104,6 @@ $conn->close();
         <a href="/quotation/add_quotation.php" class="btn btn-primary btn-sm">
             <i class="ph-bold ph-plus-circle"></i> New Quotation
         </a>
-        <a href="/orders/add_customer_po.php" class="btn btn-outline-dark btn-sm">
-            <i class="ph-bold ph-receipt"></i> Customer PO
-        </a>
         <a href="/orders/add_supplier_po.php" class="btn btn-outline-dark btn-sm">
             <i class="ph-bold ph-shopping-cart"></i> Supplier PO
         </a>
