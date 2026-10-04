@@ -350,7 +350,7 @@ function getSystemInfo() {
  * existing database (e.g. the live one) is upgraded automatically on first page load.
  * Every step is safe to run again.
  */
-define('SCHEMA_VERSION', 3);
+define('SCHEMA_VERSION', 4);
 
 function migrateSchema($conn) {
     // Line items of customer and supplier purchase orders
@@ -452,6 +452,10 @@ function migrateSchema($conn) {
         $stmt->execute();
         $stmt->close();
     }
+
+    // Sample purchase orders with line items (loaded once, see includes/sample_data.php)
+    require_once __DIR__ . '/includes/sample_data.php';
+    loadSamplePurchaseOrders($conn);
 
     $version = (string) SCHEMA_VERSION;
     $stmt = $conn->prepare("INSERT INTO system_info (meta_field, meta_value) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");
